@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>投資日記</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f12;
+    --surface: #161920;
+    --surface2: #1e222d;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #f0f2f5;
+    --text2: #8b92a5;
+    --text3: #555e72;
+    --green: #00c896;
+    --green-dim: rgba(0,200,150,0.12);
+    --red: #ff5c6a;
+    --red-dim: rgba(255,92,106,0.12);
+    --blue: #4d9fff;
+    --blue-dim: rgba(77,159,255,0.1);
+    --accent: #00c896;
+    --font: 'Sora', sans-serif;
+    --mono: 'DM Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; }
+
+  /* Header */
+  .header { padding: 20px 20px 0; display: flex; justify-content: space-between; align-items: center; }
+  .header-title { font-size: 13px; font-weight: 500; color: var(--text2); letter-spacing: 0.08em; text-transform: uppercase; }
+  .header-date { font-family: var(--mono); font-size: 12px; color: var(--text3); }
+  .refresh-btn { background: var(--surface2); border: 1px solid var(--border2); color: var(--text2); padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: var(--font); transition: all 0.2s; }
+  .refresh-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  /* Nav */
+  .nav { display: flex; gap: 2px; padding: 16px 20px 0; border-bottom: 1px solid var(--border); }
+  .nav-item { padding: 10px 16px; font-size: 13px; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.2s; border-radius: 6px 6px 0 0; }
+  .nav-item:hover { color: var(--text); }
+  .nav-item.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+
+  /* Panels */
+  .panel { display: none; padding: 20px; }
+  .panel.on { display: block; }
+
+  /* Metric cards */
+  .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
+  @media(min-width:600px){ .metrics { grid-template-columns: repeat(4, 1fr); } }
+  .mc { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .mc-l { font-size: 11px; color: var(--text3); letter-spacing: 0.05em; margin-bottom: 6px; }
+  .mc-v { font-family: var(--mono); font-size: 20px; font-weight: 500; line-height: 1; }
+  .mc-s { font-size: 11px; margin-top: 4px; color: var(--text3); }
+  .up { color: var(--green); }
+  .dn { color: var(--red); }
+
+  /* Chart containers */
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .chart-title { font-size: 12px; color: var(--text2); margin-bottom: 14px; letter-spacing: 0.05em; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; }
+  .chart-wrap { position: relative; width: 100%; }
+
+  /* Time range buttons */
+  .range-btns { display: flex; gap: 4px; }
+  .range-btn { background: transparent; border: 1px solid var(--border); color: var(--text3); padding: 3px 9px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+  .range-btn:hover { color: var(--text2); }
+  .range-btn.on { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+
+  /* Table */
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: right; font-size: 11px; font-weight: 500; color: var(--text3); padding: 6px 10px; border-bottom: 1px solid var(--border); letter-spacing: 0.05em; }
+  th:first-child, th:nth-child(2) { text-align: left; }
+  td { padding: 11px 10px; border-bottom: 1px solid var(--border); text-align: right; font-family: var(--mono); font-size: 12px; color: var(--text2); white-space: nowrap; }
+  td:first-child { text-align: left; font-family: var(--font); font-weight: 500; color: var(--text); font-size: 13px; }
+  td:nth-child(2) { text-align: left; font-family: var(--font); color: var(--text2); font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  /* Legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
+  .leg-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+  /* Buttons */
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .btn { background: var(--surface2); border: 1px solid var(--border2); color: var(--text2); padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; font-family: var(--font); transition: all 0.2s; }
+  .btn:hover { color: var(--text); border-color: var(--border2); background: var(--surface); }
+  .btn-primary { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+  .btn-primary:hover { background: rgba(0,200,150,0.2); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Status */
+  .status { font-size: 12px; color: var(--text3); margin-top: 8px; min-height: 16px; font-family: var(--mono); }
+  .status.ok { color: var(--green); }
+  .status.err { color: var(--red); }
+
+  /* Progress */
+  .prog { height: 2px; background: var(--surface2); border-radius: 1px; margin-top: 8px; overflow: hidden; }
+  .prog-bar { height: 2px; background: var(--accent); border-radius: 1px; width: 0%; transition: width 0.4s; }
+
+  /* Form */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .fg { display: flex; flex-direction: column; gap: 4px; }
+  .fg label { font-size: 11px; color: var(--text3); letter-spacing: 0.04em; }
+  .fg input, .fg select { background: var(--surface2); border: 1px solid var(--border2); color: var(--text); padding: 9px 12px; border-radius: 8px; font-size: 13px; font-family: var(--font); outline: none; transition: border-color 0.2s; }
+  .fg input:focus, .fg select:focus { border-color: var(--accent); }
+  .fg select option { background: var(--surface2); }
+
+  /* Snapshot list */
+  .snap-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .snap-item:last-child { border-bottom: none; }
+  .snap-date { font-family: var(--mono); font-size: 12px; color: var(--text3); }
+  .snap-val { font-family: var(--mono); font-size: 13px; color: var(--text); }
+
+  /* Loading overlay */
+  .loading { text-align: center; padding: 40px; color: var(--text3); font-size: 13px; }
+
+  /* Pie legend grid */
+  .pie-leg { display: grid; grid-template-columns: repeat(2,1fr); gap: 6px; margin-top: 14px; }
+  @media(min-width:500px){ .pie-leg { grid-template-columns: repeat(3,1fr); } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title">投資日記</div>
+    <div class="header-date" id="hdate"></div>
+  </div>
+  <button class="refresh-btn" onclick="refresh()">↻ 重新整理</button>
+</div>
+
+<div class="nav">
+  <div class="nav-item on" onclick="sw('overview')">總覽</div>
+  <div class="nav-item" onclick="sw('holdings')">持倉</div>
+  <div class="nav-item" onclick="sw('history')">走勢</div>
+  <div class="nav-item" onclick="sw('add')">更新</div>
+</div>
+
+<!-- 總覽 -->
+<div class="panel on" id="panel-overview">
+  <div class="metrics">
+    <div class="mc"><div class="mc-l">台股市值</div><div class="mc-v" id="ov-tw">—</div><div class="mc-s" id="ov-tw-s"></div></div>
+    <div class="mc"><div class="mc-l">未實現損益</div><div class="mc-v" id="ov-pnl">—</div><div class="mc-s" id="ov-pnl-s"></div></div>
+    <div class="mc"><div class="mc-l">總成本</div><div class="mc-v" id="ov-cost">—</div><div class="mc-s" style="color:var(--text3)">TWD</div></div>
+    <div class="mc"><div class="mc-l">報酬率</div><div class="mc-v" id="ov-ret">—</div><div class="mc-s" style="color:var(--text3)">All time</div></div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">
+      <span>各股損益</span>
+      <div class="legend" style="margin:0">
+        <div class="leg-item"><div class="leg-dot" style="background:var(--green)"></div>獲利</div>
+        <div class="leg-item"><div class="leg-dot" style="background:var(--red)"></div>虧損</div>
+      </div>
+    </div>
+    <div class="chart-wrap" style="height:260px"><canvas id="barC" role="img" aria-label="各股損益圖"></canvas></div>
+  </div>
+
+  <div class="btns">
+    <button class="btn btn-primary" id="snapBtn" onclick="doSnap()">存今日快照</button>
+    <button class="btn" onclick="sw('add')">更新股價</button>
+  </div>
+  <div class="prog"><div class="prog-bar" id="prog1"></div></div>
+  <div class="status" id="st1"></div>
+</div>
+
+<!-- 持倉 -->
+<div class="panel" id="panel-holdings">
+  <div class="chart-card">
+    <div class="chart-title">市值配置</div>
+    <div class="chart-wrap" style="height:240px"><canvas id="pieC" role="img" aria-label="市值配置圓餅圖"></canvas></div>
+    <div class="pie-leg" id="pie-leg"></div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>代號</th><th>名稱</th><th>股數</th><th>均價</th><th>現價</th><th>損益%</th><th>市值</th>
+      </tr></thead>
+      <tbody id="h-body"><tr><td colspan="7" class="loading">載入中...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 走勢 -->
+<div class="panel" id="panel-history">
+  <div class="chart-card">
+    <div class="chart-title">
+      <span>台股市值走勢</span>
+      <div class="range-btns">
+        <button class="range-btn" onclick="setRange(6)">6M</button>
+        <button class="range-btn" onclick="setRange(12)">1Y</button>
+        <button class="range-btn on" onclick="setRange(0)">All</button>
+      </div>
+    </div>
+    <div class="chart-wrap" style="height:280px"><canvas id="lineC" role="img" aria-label="台股歷史走勢"></canvas></div>
+  </div>
+  <div id="snap-list"><div class="loading">載入中...</div></div>
+</div>
+
+<!-- 更新 -->
+<div class="panel" id="panel-add">
+  <div class="chart-card">
+    <div class="chart-title">新增 / 更新持股</div>
+    <div class="form-grid">
+      <div class="fg"><label>股票代號</label><input type="text" id="f-t" placeholder="0050 / 2330"></div>
+      <div class="fg"><label>市場</label><select id="f-m"><option value="TW">台股 TWD</option><option value="US">美股 USD</option></select></div>
+    </div>
+    <div class="form-grid">
+      <div class="fg"><label>股數</label><input type="number" id="f-s" placeholder="100"></div>
+      <div class="fg"><label>平均成本</label><input type="number" id="f-c" placeholder="450.00" step="0.01"></div>
+    </div>
+    <div class="form-grid">
+      <div class="fg"><label>現價</label><input type="number" id="f-p" placeholder="500.00" step="0.01"></div>
+      <div class="fg"><label>名稱</label><input type="text" id="f-n" placeholder="元大台灣50"></div>
+    </div>
+    <div class="btns" style="margin-top:12px">
+      <button class="btn btn-primary" onclick="addStock()">寫入 Sheets</button>
+    </div>
+  </div>
+  <div class="prog"><div class="prog-bar" id="prog2"></div></div>
+  <div class="status" id="st2"></div>
+</div>
+
+<script>
+const GAS = 'https://script.google.com/macros/s/AKfycbxs6SGJCCraFtTAfq9L_NMeL7fyvM_HnZ7HPklCJpoRNJemPacdBpXNuzRz0NuRKDLVQg/exec';
+const FX = 32.5;
+const PIE_COLORS = ['#00c896','#4d9fff','#ff9f43','#a29bfe','#fd79a8','#55efc4','#fdcb6e','#e17055','#74b9ff','#6c5ce7','#00b894','#e84393','#0984e3','#b2bec3','#fab1a0','#81ecec'];
+
+let stockData = [], snapData = [], barChart = null, pieChart = null, lineChart = null;
+let allSnaps = [];
+
+const histInit = [
+  ['2024-04-28',186,0,6046],['2024-06-28',808,0,26244],['2024-07-28',1483,0,48189],
+  ['2024-08-28',1858,0,60389],['2024-09-28',2575,0,83683],['2024-10-28',3306,0,107450],
+  ['2024-11-28',3959,0,128660],['2024-12-28',9274,0,301413],['2025-01-28',17127,0,556642],
+  ['2025-02-28',19481,0,633118],['2025-03-28',19974,0,649152],['2025-04-28',18253,0,593214],
+  ['2025-05-28',19816,0,644025],['2025-06-28',21376,0,694689],['2025-07-28',15247,0,495517],
+  ['2025-08-28',16090,0,522935],['2025-09-28',18469,0,600255],['2025-10-28',16464,0,535085],
+  ['2025-11-28',9183,0,298451],['2025-12-28',16059,0,521914],['2026-01-28',33521,0,1089450],
+  ['2026-02-28',32866,0,1068155],['2026-03-28',38040,0,1236292],
+];
+
+document.getElementById('hdate').textContent = new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'});
+
+function sw(id) {
+  document.querySelectorAll('.nav-item').forEach((t,i)=>{
+    t.classList.toggle('on',['overview','holdings','history','add'][i]===id);
+  });
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  document.getElementById('panel-'+id).classList.add('on');
+  if(id==='holdings'&&stockData.length) renderHoldings();
+  if(id==='history') renderHistoryPanel();
+}
+
+async function gasCall(payload) {
+  const r = await fetch(GAS+'?t='+Date.now(), {
+    method:'POST', headers:{'Content-Type':'text/plain'},
+    body: JSON.stringify(payload)
+  });
+  if(!r.ok) throw new Error('連線失敗 '+r.status);
+  const txt = await r.text();
+  try { return JSON.parse(txt); } catch(e) { throw new Error('回應錯誤'); }
+}
+
+async function refresh() {
+  const st = document.getElementById('st1');
+  const pb = document.getElementById('prog1');
+  st.textContent = '從 Google Sheets 讀取中...'; st.className = 'status';
+  pb.style.width = '30%';
+  try {
+    const res = await gasCall({action:'read', sheet:'holdings'});
+    if(!res.ok) throw new Error(res.error||'讀取失敗');
+    stockData = res.data.slice(1).filter(r=>r[0]).map(r=>({
+      code:String(r[0]), mkt:r[1], sh:+r[2], avg:+r[3], price:+r[4], name:r[5]||r[0]
+    }));
+    pb.style.width = '100%';
+    renderOverview();
+    st.textContent = '更新：'+new Date().toLocaleTimeString('zh-TW');
+    st.className = 'status ok';
+  } catch(e) {
+    st.textContent = e.message; st.className = 'status err'; pb.style.width='0%';
+  }
+}
+
+function pct(s) { return (s.price-s.avg)/s.avg*100; }
+
+function renderOverview() {
+  let twV=0, twCost=0;
+  stockData.forEach(s=>{ if(s.mkt==='TW'){twV+=s.sh*s.price; twCost+=s.sh*s.avg;} });
+  const pnl=twV-twCost, pnlP=twCost>0?pnl/twCost*100:0, pu=pnl>=0;
+  document.getElementById('ov-tw').textContent = 'NT$'+Math.round(twV).toLocaleString();
+  document.getElementById('ov-tw-s').textContent = '≈ $'+Math.round(twV/FX).toLocaleString()+' USD';
+  document.getElementById('ov-pnl').textContent = (pu?'+':'-')+'NT$'+Math.abs(Math.round(pnl)).toLocaleString();
+  document.getElementById('ov-pnl').className = 'mc-v '+(pu?'up':'dn');
+  document.getElementById('ov-pnl-s').textContent = (pu?'+':'')+pnlP.toFixed(1)+'%';
+  document.getElementById('ov-pnl-s').className = pu?'up':'dn';
+  document.getElementById('ov-cost').textContent = 'NT$'+Math.round(twCost).toLocaleString();
+  document.getElementById('ov-ret').textContent = (pu?'+':'')+pnlP.toFixed(1)+'%';
+  document.getElementById('ov-ret').className = 'mc-v '+(pu?'up':'dn');
+  renderBar();
+}
+
+function renderBar() {
+  if(barChart){barChart.destroy();}
+  const tw = stockData.filter(s=>s.mkt==='TW').sort((a,b)=>pct(b)-pct(a));
+  barChart = new Chart(document.getElementById('barC'),{
+    type:'bar',
+    data:{labels:tw.map(s=>s.name), datasets:[{
+      data:tw.map(s=>+pct(s).toFixed(1)),
+      backgroundColor:tw.map(s=>pct(s)>=0?'rgba(0,200,150,0.7)':'rgba(255,92,106,0.7)'),
+      borderColor:tw.map(s=>pct(s)>=0?'#00c896':'#ff5c6a'),
+      borderWidth:1, borderRadius:4
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.parsed.y>0?'+':''}${c.parsed.y}%`}}},
+      scales:{
+        x:{ticks:{color:'#8b92a5',font:{size:10},maxRotation:40},grid:{display:false},border:{color:'rgba(255,255,255,0.07)'}},
+        y:{ticks:{color:'#8b92a5',callback:v=>`${v>0?'+':''}${v}%`,font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'},border:{color:'rgba(255,255,255,0.07)'}}
+      }}
+  });
+}
+
+function renderHoldings() {
+  if(pieChart){pieChart.destroy();}
+  const tw = stockData.filter(s=>s.mkt==='TW').sort((a,b)=>b.sh*b.price-a.sh*a.price);
+  const total = tw.reduce((s,x)=>s+x.sh*x.price,0);
+  pieChart = new Chart(document.getElementById('pieC'),{
+    type:'doughnut',
+    data:{labels:tw.map(s=>s.name), datasets:[{
+      data:tw.map(s=>Math.round(s.sh*s.price)),
+      backgroundColor:PIE_COLORS, borderWidth:0, hoverOffset:8
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'58%',
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` NT$${Math.round(c.parsed).toLocaleString()} (${(c.parsed/total*100).toFixed(1)}%)`}}}}
+  });
+  document.getElementById('pie-leg').innerHTML = tw.map((s,i)=>`
+    <div class="leg-item"><div class="leg-dot" style="background:${PIE_COLORS[i]}"></div>${s.name} <span style="color:var(--text2);font-family:var(--mono)">${(s.sh*s.price/total*100).toFixed(1)}%</span></div>`).join('');
+  document.getElementById('h-body').innerHTML = tw.map(s=>{
+    const p=pct(s),up=p>=0;
+    return `<tr>
+      <td>${s.code}</td><td>${s.name}</td>
+      <td>${s.sh.toLocaleString()}</td>
+      <td>${s.avg>=100?Math.round(s.avg).toLocaleString():s.avg.toFixed(2)}</td>
+      <td style="color:var(--text)">${s.price>=100?s.price.toLocaleString():s.price.toFixed(2)}</td>
+      <td class="${up?'up':'dn'}">${up?'+':''}${p.toFixed(1)}%</td>
+      <td>${Math.round(s.sh*s.price).toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function renderHistoryPanel() {
+  try {
+    const res = await gasCall({action:'read', sheet:'snapshots'});
+    let rows = [];
+    if(res.ok && res.data.length>1) {
+      rows = res.data.slice(1).filter(r=>r[0]).map(r=>({d:String(r[0]),tw:+r[3]||0}));
+    }
+    const existing = new Set(rows.map(r=>r.d.slice(0,7)));
+    histInit.forEach(h=>{ if(!existing.has(h[0].slice(0,7))) rows.push({d:h[0],tw:h[3]}); });
+    rows.sort((a,b)=>a.d.localeCompare(b.d));
+    allSnaps = rows;
+    renderLine(rows);
+    document.getElementById('snap-list').innerHTML = [...rows].reverse().slice(0,12).map(r=>`
+      <div class="snap-item">
+        <span class="snap-date">${r.d}</span>
+        <span class="snap-val">NT$${Math.round(r.tw).toLocaleString()}</span>
+      </div>`).join('');
+  } catch(e) {
+    document.getElementById('snap-list').innerHTML = `<div class="loading" style="color:var(--red)">${e.message}</div>`;
+  }
+}
+
+function setRange(months) {
+  document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('on'));
+  event.target.classList.add('on');
+  let data = allSnaps;
+  if(months>0) {
+    const cutoff = new Date(); cutoff.setMonth(cutoff.getMonth()-months);
+    data = allSnaps.filter(r=>new Date(r.d)>=cutoff);
+  }
+  renderLine(data);
+}
+
+function renderLine(rows) {
+  if(lineChart){lineChart.destroy();}
+  if(rows.length<2) return;
+  lineChart = new Chart(document.getElementById('lineC'),{
+    type:'line',
+    data:{labels:rows.map(r=>r.d.slice(0,7)), datasets:[{
+      label:'台股市值',data:rows.map(r=>r.tw),
+      borderColor:'#00c896',backgroundColor:'rgba(0,200,150,0.06)',
+      tension:0.3,fill:true,pointRadius:3,pointBackgroundColor:'#00c896',
+      pointHoverRadius:6,borderWidth:2
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' NT$'+Math.round(c.parsed.y).toLocaleString()}}},
+      scales:{
+        x:{ticks:{color:'#8b92a5',font:{size:10},maxRotation:45,autoSkip:true},grid:{display:false},border:{color:'rgba(255,255,255,0.07)'}},
+        y:{ticks:{color:'#8b92a5',callback:v=>v>=1000000?'$'+(v/1000000).toFixed(1)+'M':'$'+(v/1000).toFixed(0)+'K',font:{size:10}},grid:{color:'rgba(255,255,255,0.04)'},border:{color:'rgba(255,255,255,0.07)'}}
+      }}
+  });
+}
+
+async function doSnap() {
+  const st=document.getElementById('st1');
+  const today=new Date().toISOString().split('T')[0];
+  let twV=0;
+  stockData.forEach(s=>{if(s.mkt==='TW') twV+=s.sh*s.price;});
+  if(!twV) { st.textContent='請先重新整理載入持股'; st.className='status err'; return; }
+  try {
+    const res = await gasCall({action:'append',sheet:'snapshots',row:[today,+(twV/FX).toFixed(2),0,Math.round(twV)]});
+    if(!res.ok) throw new Error(res.error);
+    st.textContent='快照已儲存：'+today; st.className='status ok';
+  } catch(e) { st.textContent=e.message; st.className='status err'; }
+}
+
+async function addStock() {
+  const st=document.getElementById('st2'), pb=document.getElementById('prog2');
+  const ticker=(document.getElementById('f-t').value||'').trim().toUpperCase();
+  const mkt=document.getElementById('f-m').value;
+  const sh=+document.getElementById('f-s').value;
+  const cost=+document.getElementById('f-c').value;
+  const price=+document.getElementById('f-p').value;
+  const name=document.getElementById('f-n').value.trim()||ticker;
+  if(!ticker||!sh||!cost||!price){st.textContent='請填寫所有欄位';st.className='status err';return;}
+  st.textContent='讀取中...'; pb.style.width='20%';
+  try {
+    const res = await gasCall({action:'read',sheet:'holdings'});
+    if(!res.ok) throw new Error(res.error);
+    let rows = res.data.length ? res.data : [['ticker','market','shares','avg_cost','current_price','name']];
+    const idx = rows.findIndex((r,i)=>i>0&&String(r[0])===ticker);
+    if(idx>=0) rows[idx]=[ticker,mkt,sh,cost,price,name];
+    else rows.push([ticker,mkt,sh,cost,price,name]);
+    pb.style.width='60%';
+    const res2 = await gasCall({action:'write',sheet:'holdings',rows});
+    if(!res2.ok) throw new Error(res2.error);
+    pb.style.width='100%';
+    st.textContent=ticker+' 已寫入 ✓'; st.className='status ok';
+    ['f-t','f-s','f-c','f-p','f-n'].forEach(id=>document.getElementById(id).value='');
+    setTimeout(()=>refresh(),600);
+  } catch(e) { st.textContent=e.message; st.className='status err'; pb.style.width='0%'; }
+}
+
+async function initSnaps() {
+  try {
+    const res = await gasCall({action:'read',sheet:'snapshots'});
+    if(res.ok && res.data.length<=1) {
+      const rows=[['date','total_usd','us_usd','tw_twd'],...histInit];
+      await gasCall({action:'write',sheet:'snapshots',rows});
+    }
+  } catch(e){}
+}
+
+refresh();
+initSnaps();
+</script>
+</body>
+</html>
