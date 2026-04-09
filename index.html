@@ -267,7 +267,7 @@ table.div-tbl tr:hover td{background:var(--surf2)}
             <th style="text-align:left">標的</th>
             <th>損益%</th>
             <th>損益額</th>
-            <th>今日</th>
+            <th title="今日漲幅 = (現價 - 昨收) / 昨收，來自 TWSE 前一交易日收盤">今日漲幅 ℹ</th>
             <th>股數</th>
             <th>均→現</th>
           </tr>
@@ -443,38 +443,44 @@ table.div-tbl tr:hover td{background:var(--surf2)}
 
 <!-- ════════ 交易（重新設計） ════════ -->
 <div class="panel" id="panel-trade">
+
+  <!-- ── 手動輸入 ── -->
   <div class="card">
     <div class="card-title">記錄交易</div>
 
-    <!-- 買入 / 賣出 切換 -->
+    <!-- 買入 / 賣出 -->
     <div class="trade-toggle">
       <button class="trade-side buy on" id="side-buy" onclick="setSide('buy')">📈 買入</button>
       <button class="trade-side sell" id="side-sell" onclick="setSide('sell')">📉 賣出</button>
     </div>
 
-    <!-- 選標的 -->
-    <div class="stock-select-row">
-      <div class="fg" style="flex:1">
-        <label>標的</label>
-        <select id="trade-stock-sel" onchange="onStockSelChange()">
-          <option value="">— 選擇現有持股 —</option>
-        </select>
+    <!-- 標的選擇：代號 or 名稱擇一即可 -->
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;color:var(--t3);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px">標的（代號或名稱擇一，自動比對）</div>
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <!-- 代號 -->
+        <div style="flex:0 0 90px">
+          <input type="text" id="ft" placeholder="代號 ex:0050"
+            style="background:var(--surf2);border:1px solid var(--b2);color:var(--t);padding:9px 10px;border-radius:var(--r-sm);font-size:13px;font-family:var(--mono);outline:none;width:100%;transition:border-color .2s"
+            oninput="onCodeInput()" onfocus="this.style.borderColor='var(--green)'" onblur="this.style.borderColor='var(--b2)'">
+        </div>
+        <!-- 名稱（自動帶入或手動搜） -->
+        <div style="flex:1;position:relative">
+          <input type="text" id="fn" placeholder="名稱 ex:元大台灣50"
+            style="background:var(--surf2);border:1px solid var(--b2);color:var(--t);padding:9px 10px;border-radius:var(--r-sm);font-size:13px;font-family:var(--font);outline:none;width:100%;transition:border-color .2s"
+            oninput="onNameInput()" onfocus="this.style.borderColor='var(--green)';showNameDropdown()" onblur="setTimeout(hideNameDropdown,200)">
+          <!-- 下拉選項 -->
+          <div id="name-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surf);border:1px solid var(--b2);border-radius:var(--r-sm);z-index:50;max-height:180px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.15);margin-top:2px"></div>
+        </div>
       </div>
-      <button class="stock-toggle-btn" onclick="toggleManualStock()" id="manual-toggle-btn" title="手動輸入">✏️</button>
-    </div>
-    <div id="manual-stock-row" style="display:none;margin-bottom:10px">
-      <div class="form-grid">
-        <div class="fg"><label>代號</label><input type="text" id="ft" placeholder="ex: 2330"></div>
-        <div class="fg"><label>名稱</label><input type="text" id="fn" placeholder="ex: 台積電"></div>
-      </div>
+      <div id="stock-match-hint" style="font-size:11px;color:var(--t3);margin-top:4px;min-height:14px;font-family:var(--mono)"></div>
     </div>
 
-    <!-- 零股數量 + 均價 -->
+    <!-- 股數 + 單價 -->
     <div class="form-grid">
       <div class="fg">
-        <label>股數（零股）</label>
-        <input type="number" id="fs" placeholder="ex: 50" min="1" step="1">
-        <div class="qty-hint" id="qty-hint">零股交易（1股起）</div>
+        <label>股數（零股，1股起）</label>
+        <input type="number" id="fs" placeholder="ex: 50" min="1" step="1" oninput="calcTotal()">
       </div>
       <div class="fg">
         <label>成交單價（元/股）</label>
@@ -492,7 +498,7 @@ table.div-tbl tr:hover td{background:var(--surf2)}
         <span style="color:var(--t3)">手續費（0.1425%，最低1元）</span>
         <span id="calc-fee" style="font-family:var(--mono);color:var(--t3)">—</span>
       </div>
-      <div id="calc-tax-row" style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+      <div id="calc-tax-row" style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;display:none">
         <span style="color:var(--t3)">交易稅（0.3%，賣出）</span>
         <span id="calc-tax" style="font-family:var(--mono);color:var(--t3)">—</span>
       </div>
@@ -511,6 +517,44 @@ table.div-tbl tr:hover td{background:var(--surf2)}
 
     <div class="btns"><button class="btn btn-p" onclick="submitTrade()">寫入 Sheets</button></div>
   </div>
+
+  <!-- ── CSV 批次上傳 ── -->
+  <div class="card">
+    <div class="card-title">批次匯入 CSV（元大庫存明細）</div>
+    <div style="font-size:12px;color:var(--t3);margin-bottom:12px;line-height:1.7">
+      從元大網頁下載的「庫存明細」CSV，直接上傳即可更新所有持股。<br>
+      <span style="color:var(--blue)">元大 → 庫存明細 → 匯出</span>
+    </div>
+
+    <!-- 拖放 or 點擊 -->
+    <div id="csv-drop-zone"
+      style="border:2px dashed var(--b2);border-radius:var(--r);padding:28px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px"
+      onclick="document.getElementById('csv-file-input').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--green)';this.style.background='var(--gbg)'"
+      ondragleave="this.style.borderColor='var(--b2)';this.style.background=''"
+      ondrop="handleCsvDrop(event)">
+      <div style="font-size:24px;margin-bottom:8px">📂</div>
+      <div style="font-size:13px;color:var(--t2)">點擊選擇 CSV 檔案，或拖放至此</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:4px">支援 .csv、.xls（元大匯出格式）</div>
+      <input type="file" id="csv-file-input" accept=".csv,.xls,.xlsx" style="display:none" onchange="handleCsvFile(this.files[0])">
+    </div>
+
+    <!-- 預覽表格 -->
+    <div id="csv-preview" style="display:none;margin-bottom:12px">
+      <div style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px" id="csv-preview-title">解析結果預覽</div>
+      <div class="tbl-wrap" style="max-height:200px;overflow-y:auto">
+        <table class="base-tbl" id="csv-preview-table"></table>
+      </div>
+    </div>
+
+    <div class="btns">
+      <button class="btn btn-p" id="csv-upload-btn" onclick="uploadCsvToSheets()" style="display:none">✓ 確認寫入 Sheets</button>
+      <button class="btn" onclick="clearCsvPreview()">清除</button>
+    </div>
+    <div class="prog"><div class="prog-bar" id="prog-csv"></div></div>
+    <div class="status" id="st-csv"></div>
+  </div>
+
   <div class="prog"><div class="prog-bar" id="prog2"></div></div>
   <div class="status" id="st2"></div>
 </div>
@@ -634,13 +678,19 @@ async function refresh(){
     stockData=res.data.slice(1).filter(r=>r[0]).map(r=>({
       code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]
     }));
-    pb.style.width='60%';
-    prevPrices=await fetchTWSEYesterdayClose();
     pb.style.width='100%';
     renderOverview();
     st.textContent='更新：'+new Date().toLocaleTimeString('zh-TW');
     st.className='status ok';
   }catch(e){st.textContent=e.message;st.className='status err';pb.style.width='0%';}
+
+  // 昨收非同步背景抓，不卡 UI
+  fetchTWSEYesterdayClose().then(map=>{
+    if(Object.keys(map).length){
+      prevPrices=map;
+      renderPnlTable(); // 有昨收了再更新今日漲幅欄
+    }
+  }).catch(_=>{});
 }
 
 function pct(s){return(s.price-s.avg)/s.avg*100;}
@@ -779,46 +829,47 @@ async function fetchTWSEMonthly(stockNo,yyyymm){
 
 async function fetchAllDaily(){
   const fst=document.getElementById('fetch-st');
-  fst.textContent='載入每日股價...';
+  fst.textContent='透過 GAS 載入歷史資料（約 20 秒）...';
   const twStocks=stockData.filter(s=>s.mkt==='TW');
-  const codes=twStocks.map(s=>s.code);
-  const months=[];
-  const cur=new Date(2024,3,1); // 2024-04
-  while(cur<=new Date()){
-    months.push(cur.getFullYear()+String(cur.getMonth()+1).padStart(2,'0'));
-    cur.setMonth(cur.getMonth()+1);
-  }
 
-  // 1. 個股 TWSE
-  const priceMap={};
-  codes.forEach(c=>{priceMap[c]={};});
-  let done=0;
-  for(const code of codes){
-    for(const ym of months){
-      const rows=await fetchTWSEMonthly(code,ym);
-      rows.forEach(([d,v])=>{priceMap[code][d]=v;});
-      await new Promise(r=>setTimeout(r,80));
-    }
-    done++;
-    fst.textContent=`個股資料 ${done}/${codes.length}...`;
-  }
+  // 一次用 GAS yahoo_batch 抓所有個股 + ^TWII
+  // 在 GAS server side 跑，不卡瀏覽器
+  const twSymbols=twStocks.map(s=>s.code+'.TW');
+  const allSyms=[...twSymbols,'^TWII'];
+  const p1=Math.floor(new Date('2024-04-01').getTime()/1000);
+  const p2=Math.floor(Date.now()/1000);
 
-  // 2. ^TWII via GAS Yahoo
-  fst.textContent='載入加權指數...';
+  let raw={};
   try{
-    const p1=Math.floor(new Date('2024-04-01').getTime()/1000);
-    const p2=Math.floor(Date.now()/1000);
-    const res=await gas({action:'yahoo_batch',symbols:['^TWII'],period1:p1,period2:p2});
-    if(res.ok&&res.data['^TWII']){
-      twiiDaily=res.data['^TWII']; // [[date, close], ...]
+    const res=await gas({action:'yahoo_batch',symbols:allSyms,period1:p1,period2:p2});
+    if(!res.ok) throw new Error(res.error||'GAS 失敗');
+    raw=res.data||{};
+  }catch(e){
+    fst.textContent='GAS 載入失敗：'+e.message+'（改用月快照）';
+    return;
+  }
+
+  // 解析 ^TWII
+  if(raw['^TWII']?.length){
+    twiiDaily=raw['^TWII'];
+    fst.textContent=`大盤 ${twiiDaily.length} 筆 ✓，整理個股中...`;
+  }
+
+  // 建立個股 priceMap
+  const priceMap={};
+  twStocks.forEach(s=>{
+    priceMap[s.code]={};
+    const sym=s.code+'.TW';
+    if(raw[sym]){
+      raw[sym].forEach(([d,v])=>{priceMap[s.code][d]=v;});
     }
-  }catch(_){}
+  });
 
   // 3. 建立每日組合市值
   const dateSet=new Set();
-  codes.forEach(c=>Object.keys(priceMap[c]).forEach(d=>dateSet.add(d)));
+  twStocks.forEach(s=>Object.keys(priceMap[s.code]).forEach(d=>dateSet.add(d)));
   const allDates=[...dateSet].sort();
-  if(!allDates.length){fst.textContent='無 TWSE 資料，改用月快照';return;}
+  if(!allDates.length){fst.textContent='無 Yahoo 資料，使用月快照';redrawLine();return;}
 
   const latestPrice={};
   twStocks.forEach(s=>{latestPrice[s.code]=s.avg;});
@@ -912,7 +963,7 @@ function drawLine(rows){
 
   // Normalize 成百分比（相對第一個資料點）
   const base=rows[0].tw;
-  const myPctData=rows.map(r=>({x:r.d,y:(r.tw-base)/base*100}));
+  const myPctData=rows.map(r=>({x:r.d,y:+((r.tw-base)/base*100).toFixed(3)}));
   const myFinal=myPctData[myPctData.length-1].y;
 
   const datasets=[{
@@ -921,37 +972,41 @@ function drawLine(rows){
     borderColor:'#00c896',
     backgroundColor:'rgba(0,200,150,0.05)',
     tension:0.15,fill:true,
-    pointRadius:0,pointHoverRadius:5,borderWidth:2,yAxisID:'y'
+    pointRadius:0,pointHoverRadius:6,
+    pointHoverBackgroundColor:'#00c896',
+    borderWidth:2,yAxisID:'y'
   }];
 
-  // TWII overlay
+  // TWII overlay — 只要 twiiDaily 有資料就畫（不管 checkbox）
+  let twiiBase=null;
   if(showTWII&&twiiDaily.length){
     const tm={};twiiDaily.forEach(([d,v])=>{tm[d]=v;});
-    // 找起始點
-    let twiiBase=null;
     for(const r of rows){if(tm[r.d]){twiiBase=tm[r.d];break;}}
     if(twiiBase){
       let last=null;
       const twiiPctData=rows.map(r=>{
         if(tm[r.d]) last=tm[r.d];
-        return last?{x:r.d,y:(last-twiiBase)/twiiBase*100}:{x:r.d,y:null};
-      }).filter(p=>p.y!==null);
+        return{x:r.d,y:last!=null?+((last-twiiBase)/twiiBase*100).toFixed(3):null};
+      });
       datasets.push({
         label:'加權指數',
         data:twiiPctData,
         borderColor:'#4d9fff',
         backgroundColor:'transparent',
         tension:0.15,fill:false,
-        pointRadius:0,pointHoverRadius:5,borderWidth:1.5,yAxisID:'y'
+        pointRadius:0,pointHoverRadius:6,
+        pointHoverBackgroundColor:'#4d9fff',
+        borderWidth:1.5,yAxisID:'y',
+        spanGaps:true
       });
     }
   }
 
-  // X 軸標籤（抽樣）
   const labels=rows.map(r=>r.d);
-
   const gridColor=dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.06)';
   const tickColor=dark?'#4e5668':'#9ba3b5';
+  const tooltipBg=dark?'#1e222d':'#ffffff';
+  const tooltipBorder=dark?'rgba(255,255,255,0.12)':'rgba(0,0,0,0.10)';
 
   lineChart=new Chart(document.getElementById('lineC'),{
     type:'line',
@@ -962,17 +1017,31 @@ function drawLine(rows){
       plugins:{
         legend:{display:false},
         tooltip:{
-          backgroundColor:dark?'#1e222d':'#fff',
-          borderColor:dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)',
+          enabled:true,
+          backgroundColor:tooltipBg,
+          borderColor:tooltipBorder,
           borderWidth:1,
+          padding:10,
           titleColor:dark?'#8b92a5':'#5a6278',
           bodyColor:dark?'#f0f2f5':'#1a1d24',
+          bodyFont:{family:"'DM Mono',monospace",size:13},
+          titleFont:{family:"'Sora',sans-serif",size:11},
+          displayColors:true,
+          boxWidth:10,boxHeight:10,
           callbacks:{
             title:items=>fmtXLabel(items[0].label),
             label:c=>{
-              const s=c.dataset.label;
               const v=c.raw;
-              return ` ${s}  ${v>=0?'+':''}${v.toFixed(2)}%`;
+              if(v==null) return null;
+              const pctStr=(v>=0?'+':'')+v.toFixed(2)+'%';
+              // 同時顯示實際市值（只有我的台股有）
+              if(c.dataset.label==='我的台股'){
+                const rowIdx=c.dataIndex;
+                const actualVal=rows[rowIdx]?.tw;
+                const valStr=actualVal?'  NT$'+Math.round(actualVal).toLocaleString():'';
+                return ` ${c.dataset.label}  ${pctStr}${valStr}`;
+              }
+              return ` ${c.dataset.label}  ${pctStr}`;
             }
           }
         }
@@ -996,7 +1065,6 @@ function drawLine(rows){
           },
           grid:{color:gridColor,drawTicks:false},
           border:{color:'transparent'},
-          // 0% 基準線
           afterDataLimits(axis){
             const ext=Math.max(Math.abs(axis.min),Math.abs(axis.max));
             axis.min=-ext*1.05;axis.max=ext*1.05;
@@ -1006,16 +1074,21 @@ function drawLine(rows){
     }
   });
 
-  // 加 0% 虛線 annotation（CSS 輔助）
-  updateLegend(rows);
   // 更新圖例
   const legEl=document.getElementById('chart-legend');
   let legHtml=`<div class="chart-leg"><div class="chart-leg-line" style="background:#00c896"></div><span>我的台股</span><span class="chart-leg-pct ${myFinal>=0?'up':'dn'}" id="leg-my-pct">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
-  if(showTWII&&twiiDaily.length){
-    legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>加權指數</span><span class="chart-leg-pct" id="leg-twii-pct"></span></div>`;
+  if(showTWII&&twiiBase!=null){
+    // 計算 TWII 期間漲幅
+    const tm={};twiiDaily.forEach(([d,v])=>{tm[d]=v;});
+    const lastDate=rows[rows.length-1].d;
+    let twiiLast=null;
+    for(let i=rows.length-1;i>=0;i--){if(tm[rows[i].d]){twiiLast=tm[rows[i].d];break;}}
+    const twiiPct=twiiLast?((twiiLast-twiiBase)/twiiBase*100):0;
+    legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>加權指數</span><span class="chart-leg-pct ${twiiPct>=0?'up':'dn'}" id="leg-twii-pct">${twiiPct>=0?'+':''}${twiiPct.toFixed(2)}%</span></div>`;
+  } else if(showTWII&&!twiiDaily.length){
+    legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff;opacity:.4"></div><span style="color:var(--t3)">加權指數（載入中...）</span></div>`;
   }
   legEl.innerHTML=legHtml;
-  if(showTWII) updateLegend(rows);
 }
 
 // ══════════════════════════════
@@ -1196,14 +1269,68 @@ async function addLending(){
 // ══════════════════════════════
 // 交易（新版）
 // ══════════════════════════════
+
+// 台灣股票代號→名稱查詢表（從 stockData 動態建立 + 常用補充）
+let stockLookup={};  // {code: name}
+let nameLookup={};   // keywords for name search
+
+function buildStockLookup(){
+  stockLookup={};nameLookup={};
+  stockData.forEach(s=>{
+    stockLookup[s.code]=s.name;
+    nameLookup[s.name]={code:s.code,name:s.name};
+  });
+}
+
 function initTrade(){
-  // 設今天日期
   document.getElementById('trade-date').value=new Date().toISOString().slice(0,10);
-  // 填充持股選單
-  const sel=document.getElementById('trade-stock-sel');
-  sel.innerHTML='<option value="">— 選擇現有持股 —</option>'
-    +stockData.filter(s=>s.mkt==='TW').map(s=>`<option value="${s.code}|${s.name}">${s.code} ${s.name}</option>`).join('')
-    +'<option value="__manual__">✏️ 手動輸入...</option>';
+  buildStockLookup();
+}
+
+// 代號輸入 → 自動填名稱
+function onCodeInput(){
+  const code=document.getElementById('ft').value.trim().padStart(4,'0');
+  const name=stockLookup[code]||stockLookup[document.getElementById('ft').value.trim().toUpperCase()]||'';
+  if(name){
+    document.getElementById('fn').value=name;
+    document.getElementById('stock-match-hint').textContent='✓ 匹配：'+name;
+    document.getElementById('stock-match-hint').style.color='var(--green)';
+  } else {
+    document.getElementById('stock-match-hint').textContent='';
+  }
+}
+
+// 名稱輸入 → 下拉選單
+function onNameInput(){
+  const q=document.getElementById('fn').value.trim().toLowerCase();
+  document.getElementById('stock-match-hint').textContent='';
+  if(q.length<1){hideNameDropdown();return;}
+  showNameDropdown(q);
+}
+
+function showNameDropdown(q=''){
+  const dd=document.getElementById('name-dropdown');
+  const q2=q||document.getElementById('fn').value.trim().toLowerCase();
+  const matches=stockData.filter(s=>
+    s.name.toLowerCase().includes(q2)||s.code.includes(q2)
+  ).slice(0,8);
+  if(!matches.length){dd.style.display='none';return;}
+  dd.innerHTML=matches.map(s=>`
+    <div onclick="selectStock('${s.code}','${s.name}')"
+      style="padding:8px 12px;cursor:pointer;font-size:13px;display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--b)"
+      onmouseover="this.style.background='var(--surf2)'" onmouseout="this.style.background=''">
+      <span style="font-family:var(--mono);color:var(--t3);font-size:11px;flex-shrink:0">${s.code}</span>
+      <span style="color:var(--t)">${s.name}</span>
+    </div>`).join('');
+  dd.style.display='block';
+}
+function hideNameDropdown(){document.getElementById('name-dropdown').style.display='none';}
+function selectStock(code,name){
+  document.getElementById('ft').value=code;
+  document.getElementById('fn').value=name;
+  document.getElementById('stock-match-hint').textContent='✓ '+code+' '+name;
+  document.getElementById('stock-match-hint').style.color='var(--green)';
+  hideNameDropdown();
 }
 
 function setSide(side){
@@ -1212,24 +1339,6 @@ function setSide(side){
   document.getElementById('side-sell').classList.toggle('on',side==='sell');
   document.getElementById('calc-tax-row').style.display=side==='sell'?'flex':'none';
   calcTotal();
-}
-
-function onStockSelChange(){
-  const v=document.getElementById('trade-stock-sel').value;
-  if(v==='__manual__'){
-    useManualStock=true;
-    document.getElementById('manual-stock-row').style.display='block';
-    document.getElementById('trade-stock-sel').value='';
-  } else {
-    useManualStock=false;
-    document.getElementById('manual-stock-row').style.display='none';
-  }
-}
-function toggleManualStock(){
-  useManualStock=!useManualStock;
-  document.getElementById('manual-stock-row').style.display=useManualStock?'block':'none';
-  document.getElementById('manual-toggle-btn').textContent=useManualStock?'✕':'✏️';
-  if(!useManualStock){document.getElementById('ft').value='';document.getElementById('fn').value='';}
 }
 
 function calcTotal(){
@@ -1250,21 +1359,17 @@ function calcTotal(){
 
 async function submitTrade(){
   const st=document.getElementById('st2'),pb=document.getElementById('prog2');
-  // 取代號/名稱
-  let ticker='',name='';
-  if(useManualStock){
-    ticker=(document.getElementById('ft').value||'').trim().toUpperCase();
-    name=document.getElementById('fn').value.trim()||ticker;
-  } else {
-    const sel=document.getElementById('trade-stock-sel').value;
-    if(!sel){st.textContent='請選擇標的';st.className='status err';return;}
-    [ticker,name]=sel.split('|');
-  }
+  let ticker=(document.getElementById('ft').value||'').trim();
+  let name=document.getElementById('fn').value.trim();
+  // 代號補 0 到 4 碼
+  if(ticker&&!isNaN(ticker)) ticker=ticker.padStart(4,'0');
+  ticker=ticker.toUpperCase();
+  if(!name&&ticker) name=stockLookup[ticker]||ticker;
+  if(!ticker){st.textContent='請填寫代號';st.className='status err';return;}
   const mkt=document.getElementById('fm').value;
   const sh=+document.getElementById('fs').value;
   const price=+document.getElementById('fp').value;
-  const tradeDate=document.getElementById('trade-date').value;
-  if(!ticker||!sh||!price){st.textContent='請填寫股數和單價';st.className='status err';return;}
+  if(!sh||!price){st.textContent='請填寫股數和單價';st.className='status err';return;}
   st.textContent='讀取中...';pb.style.width='20%';
   try{
     const res=await gas({action:'read',sheet:'holdings'});
@@ -1273,7 +1378,6 @@ async function submitTrade(){
     const idx=rows.findIndex((r,i)=>i>0&&String(r[0])===ticker);
     if(tradeSide==='buy'){
       if(idx>=0){
-        // 更新均價和股數
         const oldSh=+rows[idx][2],oldAvg=+rows[idx][3];
         const newSh=oldSh+sh;
         const newAvg=(oldSh*oldAvg+sh*price)/newSh;
@@ -1281,7 +1385,7 @@ async function submitTrade(){
       } else {
         rows.push([ticker,mkt,sh,price,price,name]);
       }
-    } else { // sell
+    } else {
       if(idx>=0){
         const newSh=Math.max(0,+rows[idx][2]-sh);
         if(newSh===0) rows.splice(idx,1);
@@ -1292,13 +1396,122 @@ async function submitTrade(){
     const res2=await gas({action:'write',sheet:'holdings',rows});
     if(!res2.ok) throw new Error(res2.error);
     pb.style.width='100%';
-    st.textContent=`${tradeSide==='buy'?'買入':'賣出'} ${ticker} ${sh}股 ✓`;
+    st.textContent=`${tradeSide==='buy'?'買入':'賣出'} ${ticker} ${name} ${sh}股 ✓`;
     st.className='status ok';
     document.getElementById('fs').value='';
     document.getElementById('fp').value='';
     document.getElementById('trade-calc').style.display='none';
+    document.getElementById('stock-match-hint').textContent='';
     setTimeout(()=>refresh(),800);
   }catch(e){st.textContent=e.message;st.className='status err';pb.style.width='0%';}
+}
+
+// ──────────────────────────────
+// CSV 批次匯入
+// ──────────────────────────────
+let parsedCsvRows=null;
+
+function handleCsvDrop(e){
+  e.preventDefault();
+  const file=e.dataTransfer.files[0];
+  document.getElementById('csv-drop-zone').style.borderColor='var(--b2)';
+  document.getElementById('csv-drop-zone').style.background='';
+  if(file) handleCsvFile(file);
+}
+
+function handleCsvFile(file){
+  if(!file) return;
+  const st=document.getElementById('st-csv');
+  st.textContent='解析中...';st.className='status';
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const text=e.target.result;
+      parsedCsvRows=parseYuantaCsv(text);
+      showCsvPreview(parsedCsvRows);
+      st.textContent=`解析完成：${parsedCsvRows.length-1} 筆持股`;
+      st.className='status ok';
+    }catch(err){
+      st.textContent='解析失敗：'+err.message;
+      st.className='status err';
+    }
+  };
+  // 嘗試 UTF-8，失敗自動 fallback
+  reader.readAsText(file,'utf-8');
+}
+
+function parseYuantaCsv(text){
+  // 處理 BOM
+  if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
+  const rows=[['ticker','market','shares','avg_cost','current_price','name']];
+
+  let iCode=-1,iName=-1,iSh=-1,iAvg=-1,iPrice=-1;
+
+  for(const line of lines){
+    const cols=line.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
+    if(iCode===-1){
+      // 找 header 行
+      const flat=cols.map(c=>c);
+      iCode=flat.findIndex(c=>c.includes('代號')||c==='代號');
+      iName=flat.findIndex(c=>c.includes('名稱'));
+      iSh=flat.findIndex(c=>c.includes('庫存')||c.includes('股數'));
+      iAvg=flat.findIndex(c=>c.includes('均價')||c.includes('成本'));
+      iPrice=flat.findIndex(c=>c.includes('現價')||c.includes('收盤')||c.includes('市價'));
+      if(iCode>=0) continue; // 找到 header
+    }
+    if(iCode<0||!cols[iCode]) continue;
+    const code=cols[iCode].trim().padStart(4,'0').replace('*','');
+    const name=iName>=0?cols[iName].trim().replace('*',''):'';
+    const sh=iSh>=0?parseFloat(cols[iSh].replace(/,/g,'')):0;
+    const avg=iAvg>=0?parseFloat(cols[iAvg].replace(/,/g,'')):0;
+    const price=iPrice>=0?parseFloat(cols[iPrice].replace(/,/g,'')):avg;
+    if(!code||code==='代號'||isNaN(sh)||sh<=0) continue;
+    rows.push([code,'TW',Math.round(sh),isNaN(avg)?0:+avg.toFixed(4),isNaN(price)?0:+price.toFixed(2),name]);
+  }
+  return rows;
+}
+
+function showCsvPreview(rows){
+  document.getElementById('csv-preview').style.display='block';
+  document.getElementById('csv-upload-btn').style.display='inline-flex';
+  const tbl=document.getElementById('csv-preview-table');
+  const head=rows[0];
+  const data=rows.slice(1).slice(0,10); // 最多預覽10筆
+  tbl.innerHTML=`<thead><tr>${head.map(h=>`<th style="text-align:left">${h}</th>`).join('')}</tr></thead>
+  <tbody>${data.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  document.getElementById('csv-preview-title').textContent=`解析結果（共 ${rows.length-1} 筆${rows.length-1>10?'，顯示前10筆':''}）`;
+}
+
+function clearCsvPreview(){
+  parsedCsvRows=null;
+  document.getElementById('csv-preview').style.display='none';
+  document.getElementById('csv-upload-btn').style.display='none';
+  document.getElementById('st-csv').textContent='';
+  document.getElementById('csv-file-input').value='';
+}
+
+async function uploadCsvToSheets(){
+  if(!parsedCsvRows||parsedCsvRows.length<2){
+    document.getElementById('st-csv').textContent='沒有可寫入的資料';
+    document.getElementById('st-csv').className='status err';
+    return;
+  }
+  const st=document.getElementById('st-csv'),pb=document.getElementById('prog-csv');
+  st.textContent='寫入中...';st.className='status';pb.style.width='30%';
+  try{
+    const res=await gas({action:'write',sheet:'holdings',rows:parsedCsvRows});
+    if(!res.ok) throw new Error(res.error);
+    pb.style.width='100%';
+    st.textContent=`✓ 已寫入 ${parsedCsvRows.length-1} 筆持股到 Sheets`;
+    st.className='status ok';
+    clearCsvPreview();
+    setTimeout(()=>refresh(),800);
+  }catch(e){
+    st.textContent='寫入失敗：'+e.message;
+    st.className='status err';
+    pb.style.width='0%';
+  }
 }
 
 // ── Snap ──
