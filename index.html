@@ -49,14 +49,26 @@ body.light .theme-toggle::after{transform:translateX(16px);background:var(--gree
 .legend-row{display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap}
 .leg{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--t2)}
 .leg-line{width:20px;height:3px;border-radius:2px;flex-shrink:0}
-.pnl-list{display:flex;flex-direction:column;gap:12px}
-.pnl-row{display:flex;flex-direction:column;gap:5px}
-.pnl-top{display:flex;justify-content:space-between;align-items:baseline}
-.pnl-name{font-size:14px;font-weight:500;color:var(--t)}
-.pnl-pct{font-family:var(--mono);font-size:14px;font-weight:500}
-.pnl-bar-bg{height:8px;background:var(--surf2);border-radius:4px;overflow:hidden}
-.pnl-bar-fill{height:8px;border-radius:4px;transition:width .6s cubic-bezier(.4,0,.2,1)}
-.pnl-sub{font-size:12px;color:var(--t3);font-family:var(--mono)}
+
+/* ── 個股損益卡片（新版）── */
+.pnl-grid{display:flex;flex-direction:column;gap:0}
+.pnl-card{padding:14px 0;border-bottom:1px solid var(--b);display:flex;flex-direction:column;gap:6px}
+.pnl-card:last-child{border-bottom:none}
+.pnl-row1{display:flex;justify-content:space-between;align-items:center}
+.pnl-code{font-size:11px;color:var(--t3);font-family:var(--mono)}
+.pnl-name{font-size:18px;font-weight:600;color:var(--t);letter-spacing:-.01em}
+.pnl-pct{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1}
+.pnl-row2{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px}
+.pnl-detail{font-family:var(--mono);font-size:12px;color:var(--t3)}
+.pnl-gain{font-family:var(--mono);font-size:14px;font-weight:500}
+.pnl-row3{display:flex;gap:12px;flex-wrap:wrap}
+.pnl-meta{font-size:12px;color:var(--t3);font-family:var(--mono)}
+.pnl-chg-badge{display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:12px;padding:2px 7px;border-radius:4px}
+.sort-row{display:flex;gap:6px;margin-bottom:14px}
+.sort-btn{background:transparent;border:1px solid var(--b2);color:var(--t3);padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;font-family:var(--font);transition:all .15s}
+.sort-btn.on{background:var(--gbg);border-color:var(--green);color:var(--green)}
+.sort-btn:hover{color:var(--t2)}
+
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th{text-align:right;font-size:12px;font-weight:500;color:var(--t3);padding:8px 10px;border-bottom:1px solid var(--b);letter-spacing:.04em;white-space:nowrap}
@@ -93,6 +105,17 @@ tr:hover td{background:var(--surf2)}
 .fetch-st{font-size:12px;color:var(--t3);margin:6px 0 10px;font-family:var(--mono);min-height:16px}
 .twii-cb-wrap{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--t2);cursor:pointer}
 .twii-cb-wrap input{accent-color:var(--blue);width:15px;height:15px;cursor:pointer}
+
+/* ── 股利清單 ── */
+.div-hero{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px}
+@media(min-width:640px){.div-hero{grid-template-columns:repeat(3,1fr)}}
+.div-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:20px;background:var(--gbg);color:var(--green);font-family:var(--mono);white-space:nowrap}
+.div-yr-bar{display:flex;gap:6px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.div-yr-btn{background:transparent;border:1px solid var(--b2);color:var(--t3);padding:3px 10px;border-radius:6px;font-size:12px;cursor:pointer;font-family:var(--font);transition:all .15s}
+.div-yr-btn.on{background:var(--gbg);border-color:var(--green);color:var(--green)}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:var(--mono);padding:1px 7px;border-radius:4px;white-space:nowrap}
+.chip-g{background:var(--gbg);color:var(--green)}
+.chip-b{background:rgba(77,159,255,0.1);color:var(--blue)}
 </style>
 </head>
 <body class="dark">
@@ -113,6 +136,7 @@ tr:hover td{background:var(--surf2)}
   <div class="nav-item on" onclick="sw('overview')">總覽</div>
   <div class="nav-item" onclick="sw('holdings')">持倉</div>
   <div class="nav-item" onclick="sw('history')">走勢</div>
+  <div class="nav-item" onclick="sw('dividends')">股利</div>
   <div class="nav-item" onclick="sw('lending')">借貸</div>
   <div class="nav-item" onclick="sw('add')">更新</div>
 </div>
@@ -126,8 +150,15 @@ tr:hover td{background:var(--surf2)}
     <div class="mc"><div class="mc-l">報酬率</div><div class="mc-v" id="ov-ret">—</div><div class="mc-s" style="color:var(--t3)">整體</div></div>
   </div>
   <div class="card">
-    <div class="card-title">個股損益</div>
-    <div class="pnl-list" id="pnl-list"><div class="loading">載入中...</div></div>
+    <div class="card-title">
+      <span>個股損益</span>
+      <div class="sort-row" style="margin:0">
+        <button class="sort-btn on" id="sort-pct" onclick="setSortMode('pct',this)">損益%</button>
+        <button class="sort-btn" id="sort-gain" onclick="setSortMode('gain',this)">損益額</button>
+        <button class="sort-btn" id="sort-chg" onclick="setSortMode('chg',this)">今日漲幅</button>
+      </div>
+    </div>
+    <div class="pnl-grid" id="pnl-list"><div class="loading">載入中...</div></div>
   </div>
   <div class="btns">
     <button class="btn btn-p" onclick="doSnap()">存今日快照</button>
@@ -183,6 +214,38 @@ tr:hover td{background:var(--surf2)}
     <div class="chart-wrap" style="height:320px"><canvas id="lineC" role="img" aria-label="資產走勢"></canvas></div>
   </div>
   <div id="snap-list"></div>
+</div>
+
+<!-- 股利 -->
+<div class="panel" id="panel-dividends">
+  <div class="div-hero" id="div-metrics"></div>
+  <div class="card">
+    <div class="card-title">
+      <span>股利收入紀錄</span>
+      <div class="div-yr-bar" id="div-yr-bar" style="margin:0"></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>代號</th><th>名稱</th>
+            <th>配息日</th><th>股數</th>
+            <th>每股現金(元)</th><th>實收金額(NT$)</th>
+          </tr>
+        </thead>
+        <tbody id="div-body"><tr><td colspan="6" class="loading">載入中...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">除權息總覽（TWSE 資料）</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>代號</th><th>名稱</th><th>現金股利(元)</th><th>股票股利</th><th>我的估收(NT$)</th></tr></thead>
+        <tbody id="div-overview-body"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <!-- 借貸 -->
@@ -248,12 +311,44 @@ tr:hover td{background:var(--surf2)}
 const GAS='https://script.google.com/macros/s/AKfycbxs6SGJCCraFtTAfq9L_NMeL7fyvM_HnZ7HPklCJpoRNJemPacdBpXNuzRz0NuRKDLVQg/exec';
 const FX=32.5;
 const PIE_COLORS=['#00c896','#4d9fff','#ffaa44','#a78bfa','#f87171','#34d399','#fbbf24','#60a5fa','#f472b6','#2dd4bf','#fb923c','#818cf8','#4ade80','#e879f9','#38bdf8','#a3e635'];
+// Yahoo Finance 符號（走勢圖用）
 const TW_SYMS=['0050.TW','1519.TW','1815.TW','2308.TW','2313.TW','2330.TW','2344.TW','2408.TW','3017.TW','3363.TW','3491.TW','3653.TW','6285.TW','6510.TW','8299.TW','8996.TW'];
+
+// ── 股利靜態資料（從 CSV 解析，可在 Sheets dividends sheet 擴充）──
+// 格式：{code, name, date, shares, cashPerShare}
+// cashPerShare 單位：元/股；實收 = shares * cashPerShare
+const DIVIDEND_RECORDS = [
+  // 0050 元大台灣50
+  {code:'0050',name:'元大台灣50',date:'2024-07-22',shares:206,cashPerShare:2.0},
+  {code:'0050',name:'元大台灣50',date:'2024-10-21',shares:362,cashPerShare:2.0},
+  {code:'0050',name:'元大台灣50',date:'2025-01-21',shares:909,cashPerShare:2.0},
+  {code:'0050',name:'元大台灣50',date:'2025-04-21',shares:1109,cashPerShare:2.05},
+  {code:'0050',name:'元大台灣50',date:'2025-07-21',shares:1870,cashPerShare:2.05},
+  {code:'0050',name:'元大台灣50',date:'2025-10-21',shares:1870,cashPerShare:2.05},
+  // 0056 元大高股息
+  {code:'0056',name:'元大高股息',date:'2024-07-18',shares:3060,cashPerShare:2.0},
+  {code:'0056',name:'元大高股息',date:'2024-10-18',shares:4328,cashPerShare:1.2},
+  {code:'0056',name:'元大高股息',date:'2025-01-20',shares:9267,cashPerShare:1.2},
+  {code:'0056',name:'元大高股息',date:'2025-04-18',shares:4728,cashPerShare:1.2},
+  {code:'0056',name:'元大高股息',date:'2025-07-18',shares:4996,cashPerShare:1.3},
+  {code:'0056',name:'元大高股息',date:'2025-10-17',shares:4131,cashPerShare:1.3},
+];
+
+// 除權息總覽（從 CSV 匯入）
+const DIVIDEND_OVERVIEW = [
+  {code:'0050',name:'元大台灣50',cash:2.05,stock:'--'},
+  {code:'0056',name:'元大高股息',cash:1.3,stock:'--'},
+  {code:'2330',name:'台積電',cash:4.5,stock:'--'},
+  {code:'2344',name:'華邦電',cash:0.3,stock:'--'},
+  {code:'2454',name:'聯發科',cash:68.0,stock:'--'},
+  {code:'8996',name:'高力',cash:4.0,stock:'--'},
+];
 
 let stockData=[], lendData=[], lineChart=null, pieChart=null;
 let dailyPortfolio=[], twiiDaily=[], currentRange=0, showTWII=false;
+let sortMode='pct'; // pct | gain | chg
+let prevPrices={}; // code -> yesterday close (from TWSE)
 
-// 月快照備用資料
 const histMonthly=[
   ['2024-04-28',6046],['2024-06-28',26244],['2024-07-28',48189],['2024-08-28',60389],
   ['2024-09-28',83683],['2024-10-28',107450],['2024-11-28',128660],['2024-12-28',301413],
@@ -282,12 +377,14 @@ function toggleTheme(){
 document.getElementById('hdate').textContent=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'});
 
 function sw(id){
-  document.querySelectorAll('.nav-item').forEach((t,i)=>{t.classList.toggle('on',['overview','holdings','history','lending','add'][i]===id);});
+  const tabs=['overview','holdings','history','dividends','lending','add'];
+  document.querySelectorAll('.nav-item').forEach((t,i)=>{t.classList.toggle('on',tabs[i]===id);});
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.getElementById('panel-'+id).classList.add('on');
   if(id==='holdings'&&stockData.length) renderHoldings();
   if(id==='history') initHistory();
   if(id==='lending') renderLending();
+  if(id==='dividends') renderDividends();
 }
 
 async function gas(payload){
@@ -297,13 +394,79 @@ async function gas(payload){
   try{return JSON.parse(txt);}catch(e){throw new Error('回應格式錯誤');}
 }
 
-// ── 時間戳 → YYYY-MM-DD (台灣時區 UTC+8) ──
 function tsToDate(ts){
   const d=new Date((ts+8*3600)*1000);
-  const y=d.getUTCFullYear();
-  const m=String(d.getUTCMonth()+1).padStart(2,'0');
-  const dd=String(d.getUTCDate()).padStart(2,'0');
-  return `${y}-${m}-${dd}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+}
+
+// ── TWSE API：抓昨日收盤（免 CORS proxy，用 GAS 轉發也可；直接試）──
+// TWSE 日成交資訊 API：https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=YYYYMMDD&stockNo=XXXX
+// 也可用 iex 報價（備援）
+async function fetchTWSEYesterdayClose(codes){
+  // 嘗試 TWSE 大盤全覽（當日所有股票最後收盤）
+  const today=new Date();
+  // 台股 T+2，往前抓最近交易日
+  const dates=[];
+  for(let i=1;i<=5;i++){
+    const d=new Date(today); d.setDate(d.getDate()-i);
+    const dow=d.getDay();
+    if(dow===0||dow===6) continue;
+    const yyyymmdd=d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+    dates.push(yyyymmdd);
+    if(dates.length>=2) break;
+  }
+  // 用前一交易日（dates[0]）的TWSE收盤資料
+  const prevDate=dates[0];
+  const map={};
+  try{
+    const url=`https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${prevDate}&type=ALLBUT0999`;
+    const r=await fetch(url,{headers:{'Accept':'application/json'}});
+    if(!r.ok) throw new Error('TWSE API error');
+    const j=await r.json();
+    // MI_INDEX 有 data9 (上市一般股票)
+    const rows=j.data9||j.tables?.find(t=>t.title?.includes('上市'))?.data||[];
+    rows.forEach(row=>{
+      // row format: [代號, 名稱, ..., 收盤價, 漲跌, ...]
+      const code=String(row[0]).trim();
+      const closeStr=String(row[8]||'').replace(/,/g,'');
+      const close=parseFloat(closeStr);
+      if(!isNaN(close)) map[code]=close;
+    });
+  }catch(e){
+    // 備援：逐支抓
+    for(const code of codes){
+      try{
+        const url=`https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?response=json&date=${prevDate}&stockNo=${code}`;
+        const r=await fetch(url);
+        const j=await r.json();
+        if(j.data&&j.data.length){
+          const last=j.data[j.data.length-1];
+          const close=parseFloat(String(last[6]).replace(/,/g,''));
+          if(!isNaN(close)) map[code]=close;
+        }
+      }catch(_){}
+    }
+  }
+  return map;
+}
+
+// ── TWSE 歷史股價（用於走勢圖，替代 Yahoo Finance）──
+// API: https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?response=json&date=YYYYMM01&stockNo=XXXX
+async function fetchTWSEMonthly(stockNo, yyyymm){
+  const url=`https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?response=json&date=${yyyymm}01&stockNo=${stockNo}`;
+  try{
+    const r=await fetch(url);
+    const j=await r.json();
+    if(!j.data||!j.data.length) return [];
+    return j.data.map(row=>{
+      // date: 民國年/月/日 → YYYY-MM-DD
+      const parts=String(row[0]).split('/');
+      const yy=parseInt(parts[0])+1911;
+      const dateStr=`${yy}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+      const close=parseFloat(String(row[6]).replace(/,/g,''));
+      return isNaN(close)?null:[dateStr,close];
+    }).filter(Boolean);
+  }catch(e){return [];}
 }
 
 async function refresh(){
@@ -313,6 +476,14 @@ async function refresh(){
     const res=await gas({action:'read',sheet:'holdings'});
     if(!res.ok) throw new Error(res.error||'讀取失敗');
     stockData=res.data.slice(1).filter(r=>r[0]).map(r=>({code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]}));
+    pb.style.width='60%';
+
+    // 抓昨日收盤
+    const twCodes=stockData.filter(s=>s.mkt==='TW').map(s=>s.code);
+    try{
+      prevPrices=await fetchTWSEYesterdayClose(twCodes);
+    }catch(_){}
+
     pb.style.width='100%';
     renderOverview();
     st.textContent='更新：'+new Date().toLocaleTimeString('zh-TW');
@@ -321,6 +492,18 @@ async function refresh(){
 }
 
 function pct(s){return(s.price-s.avg)/s.avg*100;}
+function dayChg(s){
+  const prev=prevPrices[s.code];
+  if(!prev) return null;
+  return (s.price-prev)/prev*100;
+}
+
+function setSortMode(mode,btn){
+  sortMode=mode;
+  document.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  renderPnlBars();
+}
 
 function renderOverview(){
   let twV=0,twC=0;
@@ -339,21 +522,49 @@ function renderOverview(){
 }
 
 function renderPnlBars(){
-  const tw=stockData.filter(s=>s.mkt==='TW').sort((a,b)=>pct(b)-pct(a));
-  const maxAbs=Math.max(...tw.map(s=>Math.abs(pct(s))),1);
-  const dark=document.body.classList.contains('dark');
-  document.getElementById('pnl-list').innerHTML=tw.map(s=>{
+  const tw=stockData.filter(s=>s.mkt==='TW');
+
+  // 排序
+  let sorted=[...tw];
+  if(sortMode==='pct') sorted.sort((a,b)=>pct(b)-pct(a));
+  else if(sortMode==='gain') sorted.sort((a,b)=>(b.price-b.avg)*b.sh-(a.price-a.avg)*a.sh);
+  else if(sortMode==='chg'){
+    sorted.sort((a,b)=>{
+      const ca=dayChg(a)??-Infinity, cb=dayChg(b)??-Infinity;
+      return cb-ca;
+    });
+  }
+
+  document.getElementById('pnl-list').innerHTML=sorted.map(s=>{
     const p=pct(s),up=p>=0;
-    const w=Math.abs(p)/maxAbs*100;
-    const bc=up?(dark?'rgba(0,200,150,0.75)':'rgba(0,168,118,0.7)'):(dark?'rgba(255,92,106,0.75)':'rgba(224,52,68,0.7)');
     const gain=Math.round((s.price-s.avg)*s.sh);
-    return`<div class="pnl-row">
-      <div class="pnl-top">
-        <div class="pnl-name">${s.name} <span style="font-size:12px;color:var(--t3);font-weight:400">${s.code}</span></div>
+    const chg=dayChg(s);
+
+    // 今日漲跌 badge
+    let chgHtml='';
+    if(chg!==null){
+      const cup=chg>=0;
+      chgHtml=`<span class="pnl-chg-badge" style="background:${cup?'var(--gbg)':'var(--rbg)'}; color:${cup?'var(--green)':'var(--red)'}">
+        今日 ${cup?'▲':'▼'}${Math.abs(chg).toFixed(2)}%</span>`;
+    } else {
+      chgHtml=`<span class="pnl-meta">昨收 —</span>`;
+    }
+
+    return`<div class="pnl-card">
+      <div class="pnl-row1">
+        <div>
+          <div class="pnl-code">${s.code}</div>
+          <div class="pnl-name">${s.name}</div>
+        </div>
         <div class="pnl-pct ${up?'up':'dn'}">${up?'+':''}${p.toFixed(2)}%</div>
       </div>
-      <div class="pnl-bar-bg"><div class="pnl-bar-fill" style="width:${w.toFixed(1)}%;background:${bc}"></div></div>
-      <div class="pnl-sub">${s.sh.toLocaleString()}股 · 均${s.avg>=100?Math.round(s.avg):s.avg.toFixed(2)} → ${s.price>=100?s.price.toLocaleString():s.price.toFixed(2)} · ${up?'+':''}NT$${gain.toLocaleString()}</div>
+      <div class="pnl-row2">
+        <div class="pnl-detail">${s.sh.toLocaleString()}股 · 均${s.avg>=100?Math.round(s.avg).toLocaleString():s.avg.toFixed(2)} → ${s.price>=100?s.price.toLocaleString():s.price.toFixed(2)}</div>
+        <div class="pnl-gain ${up?'up':'dn'}">${up?'+':''}NT$${Math.abs(gain).toLocaleString()}</div>
+      </div>
+      <div class="pnl-row3">${chgHtml}
+        <span class="pnl-meta">市值 NT$${Math.round(s.sh*s.price).toLocaleString()}</span>
+      </div>
     </div>`;
   }).join('');
 }
@@ -381,10 +592,81 @@ function renderHoldings(){
   }).join('');
 }
 
+// ── 股利面板 ──
+let divYearFilter='ALL';
+function renderDividends(){
+  // 先嘗試從 Sheets 載入（dividends sheet），失敗則用靜態資料
+  renderDividendUI(DIVIDEND_RECORDS);
+  // 嘗試非同步更新
+  gas({action:'read',sheet:'dividends'}).then(res=>{
+    if(res.ok&&res.data.length>1){
+      const rows=res.data.slice(1).filter(r=>r[0]).map(r=>({
+        code:String(r[0]),name:String(r[1]),date:String(r[2]),
+        shares:+r[3],cashPerShare:+r[4]
+      }));
+      if(rows.length) renderDividendUI(rows);
+    }
+  }).catch(_=>{});
+}
+
+function renderDividendUI(records){
+  // 年份清單
+  const years=[...new Set(records.map(r=>r.date.slice(0,4)))].sort().reverse();
+  const filtered=divYearFilter==='ALL'?records:records.filter(r=>r.date.startsWith(divYearFilter));
+
+  // 指標
+  const total=filtered.reduce((s,r)=>s+r.shares*r.cashPerShare,0);
+  const totalAll=records.reduce((s,r)=>s+r.shares*r.cashPerShare,0);
+  const byCode={};
+  records.forEach(r=>{byCode[r.code]=(byCode[r.code]||0)+r.shares*r.cashPerShare;});
+  const topCode=Object.entries(byCode).sort((a,b)=>b[1]-a[1])[0];
+
+  document.getElementById('div-metrics').innerHTML=`
+    <div class="mc"><div class="mc-l">期間股利合計</div><div class="mc-v up">NT$${Math.round(total).toLocaleString()}</div><div class="mc-s">已收現金</div></div>
+    <div class="mc"><div class="mc-l">累計總股利</div><div class="mc-v">NT$${Math.round(totalAll).toLocaleString()}</div><div class="mc-s">全部期間</div></div>
+    <div class="mc"><div class="mc-l">最高貢獻</div><div class="mc-v" style="font-size:16px">${topCode?topCode[0]:'-'}</div><div class="mc-s">NT$${topCode?Math.round(topCode[1]).toLocaleString():'0'}</div></div>
+  `;
+
+  // 年份切換按鈕
+  document.getElementById('div-yr-bar').innerHTML=
+    ['ALL',...years].map(y=>`<button class="div-yr-btn ${divYearFilter===y?'on':''}" onclick="setDivYear('${y}',this)">${y==='ALL'?'全部':y}</button>`).join('');
+
+  // 明細表格
+  const sorted=[...filtered].sort((a,b)=>b.date.localeCompare(a.date));
+  document.getElementById('div-body').innerHTML=sorted.map(r=>{
+    const income=Math.round(r.shares*r.cashPerShare);
+    return`<tr>
+      <td>${r.code}</td><td>${r.name}</td><td>${r.date}</td>
+      <td>${r.shares.toLocaleString()}</td>
+      <td>${r.cashPerShare.toFixed(2)}</td>
+      <td class="up">+${income.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+
+  // 除權息總覽
+  const heldMap={};
+  stockData.forEach(s=>{ heldMap[s.code]=s.sh; });
+  document.getElementById('div-overview-body').innerHTML=DIVIDEND_OVERVIEW.map(d=>{
+    const held=heldMap[d.code]||0;
+    const est=held?Math.round(held*d.cash):0;
+    return`<tr>
+      <td>${d.code}</td><td>${d.name}</td>
+      <td>${d.cash.toFixed(2)}</td><td>${d.stock}</td>
+      <td>${held?`<span class="chip chip-g">+NT$${est.toLocaleString()}</span>`:'<span style="color:var(--t3)">未持有</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function setDivYear(y,btn){
+  divYearFilter=y;
+  document.querySelectorAll('.div-yr-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  renderDividendUI(DIVIDEND_RECORDS);
+}
+
 // ── History ──
 let historyInited=false;
 async function initHistory(){
-  // 先用月快照畫圖
   drawLine(histMonthly.map(h=>({d:h[0],tw:h[1]})));
   document.getElementById('snap-list').innerHTML=histMonthly.slice().reverse().map(h=>`
     <div class="snap-item"><span class="snap-date">${h[0]}</span><span class="snap-val">NT$${h[1].toLocaleString()}</span></div>`).join('');
@@ -394,82 +676,122 @@ async function initHistory(){
   await fetchAllDaily();
 }
 
+// ── TWSE 歷史走勢（主力）+ Yahoo 備援 ──
+async function fetchTWSEDailyAll(){
+  // 只拿目前持倉股票
+  const twStocks=stockData.filter(s=>s.mkt==='TW');
+  const codes=twStocks.map(s=>s.code);
+
+  const startDate=new Date('2024-04-01');
+  const now=new Date();
+
+  // 產生 YYYYMM 月份清單
+  const months=[];
+  const cur=new Date(startDate.getFullYear(),startDate.getMonth(),1);
+  while(cur<=now){
+    months.push(cur.getFullYear()+String(cur.getMonth()+1).padStart(2,'0'));
+    cur.setMonth(cur.getMonth()+1);
+  }
+
+  const priceMap={};
+  codes.forEach(c=>{priceMap[c]={};});
+
+  const fst=document.getElementById('fetch-st');
+  let done=0;
+
+  // 逐支股票、逐月抓
+  for(const code of codes){
+    for(const ym of months){
+      const rows=await fetchTWSEMonthly(code,ym);
+      rows.forEach(([d,v])=>{priceMap[code][d]=v;});
+      await new Promise(r=>setTimeout(r,120)); // 避免過快
+    }
+    done++;
+    fst.textContent=`TWSE 資料載入中... ${done}/${codes.length} 支`;
+  }
+  return priceMap;
+}
+
 async function fetchAllDaily(){
   const fst=document.getElementById('fetch-st');
-  fst.textContent='正在抓取每日股價資料，請稍候（約 20 秒）...';
-  const now=Math.floor(Date.now()/1000);
-  const p1=Math.floor(new Date('2024-04-01').getTime()/1000);
-  const allSyms=[...TW_SYMS,'^TWII'];
+  fst.textContent='正在透過 TWSE API 抓取歷史股價（台灣官方資料）...';
 
   try{
-    const res=await gas({action:'yahoo_batch',symbols:allSyms,period1:p1,period2:now});
-    if(!res.ok) throw new Error(res.error||'抓取失敗');
-    const raw=res.data;
+    const priceMap=await fetchTWSEDailyAll();
 
-    // ── 解析大盤 ──
-    const twiiRaw=raw['^TWII']||[];
-    const twiiMap={};
-    twiiRaw.forEach(([d,v])=>{ if(v) twiiMap[d]=v; });
-    twiiDaily=twiiRaw.filter(([d,v])=>v!=null);
-
-    // ── 解析持股每日價格 ──
-    const priceMap={}; // code -> {date->price}
-    TW_SYMS.forEach(sym=>{
-      const code=sym.replace('.TW','');
-      priceMap[code]={};
-      (raw[sym]||[]).forEach(([d,v])=>{ if(v) priceMap[code][d]=v; });
-    });
-
-    // ── 建立每日日期集合 ──
+    const twStocks=stockData.filter(s=>s.mkt==='TW');
     const dateSet=new Set();
-    TW_SYMS.forEach(sym=>{
-      const code=sym.replace('.TW','');
-      Object.keys(priceMap[code]).forEach(d=>dateSet.add(d));
-    });
+    twStocks.forEach(s=>Object.keys(priceMap[s.code]||{}).forEach(d=>dateSet.add(d)));
     const allDates=[...dateSet].sort();
 
-    if(!allDates.length) throw new Error('無法取得股價資料');
+    if(!allDates.length) throw new Error('無 TWSE 資料，改用 Yahoo Finance 備援');
 
-    // ── 計算每日組合市值 ──
-    // 為每支股票建立「最近收盤價」lookup
-    const latestPrice={}; // code -> price (rolling)
-    const twStocks=stockData.filter(s=>s.mkt==='TW');
-
-    // 初始化：用均價做預設
-    twStocks.forEach(s=>{ latestPrice[s.code]=s.avg; });
+    const latestPrice={};
+    twStocks.forEach(s=>{latestPrice[s.code]=s.avg;});
 
     dailyPortfolio=[];
     allDates.forEach(d=>{
-      // 更新當天有收盤價的股票
-      twStocks.forEach(s=>{
-        const p=priceMap[s.code][d];
-        if(p) latestPrice[s.code]=p;
-      });
-      // 計算組合市值
+      twStocks.forEach(s=>{const p=(priceMap[s.code]||{})[d];if(p) latestPrice[s.code]=p;});
       const total=twStocks.reduce((sum,s)=>sum+(s.sh*(latestPrice[s.code]||0)),0);
       if(total>0) dailyPortfolio.push({d,tw:Math.round(total)});
     });
 
-    // ── 合併月快照（2024/04以前用月資料，之後用每日）──
-    const dailyStart=dailyPortfolio.length?dailyPortfolio[0].d:'9999-99-99';
-    const monthOnly=histMonthly.filter(h=>h[0]<dailyStart).map(h=>({d:h[0],tw:h[1]}));
-    const merged=[...monthOnly,...dailyPortfolio].sort((a,b)=>a.d.localeCompare(b.d));
-
-    fst.textContent=`每日資料載入完成 ✓（共 ${dailyPortfolio.length} 個交易日）`;
-
-    // 更新快照清單
-    document.getElementById('snap-list').innerHTML=[...merged].reverse().slice(0,20).map(r=>`
-      <div class="snap-item"><span class="snap-date">${r.d}</span><span class="snap-val">NT$${r.tw.toLocaleString()}</span></div>`).join('');
-
-    // 重畫圖表（套用目前選的時間範圍）
-    currentData=merged;
-    redrawLine();
+    fst.textContent=`TWSE 資料載入完成 ✓（${dailyPortfolio.length} 個交易日）`;
+    buildAndDrawHistory();
 
   }catch(e){
-    fst.textContent='每日資料抓取失敗：'+e.message+'（使用月快照）';
+    fst.textContent='TWSE 失敗，改用 Yahoo Finance：'+e.message;
+    await fetchAllDailyYahoo();
+  }
+}
+
+async function fetchAllDailyYahoo(){
+  const fst=document.getElementById('fetch-st');
+  const now=Math.floor(Date.now()/1000);
+  const p1=Math.floor(new Date('2024-04-01').getTime()/1000);
+  const allSyms=[...TW_SYMS,'^TWII'];
+  try{
+    const res=await gas({action:'yahoo_batch',symbols:allSyms,period1:p1,period2:now});
+    if(!res.ok) throw new Error(res.error||'抓取失敗');
+    const raw=res.data;
+    const twiiRaw=raw['^TWII']||[];
+    twiiDaily=twiiRaw.filter(([d,v])=>v!=null);
+    const priceMap={};
+    TW_SYMS.forEach(sym=>{
+      const code=sym.replace('.TW','');
+      priceMap[code]={};
+      (raw[sym]||[]).forEach(([d,v])=>{if(v) priceMap[code][d]=v;});
+    });
+    const dateSet=new Set();
+    TW_SYMS.forEach(sym=>Object.keys(priceMap[sym.replace('.TW','')]).forEach(d=>dateSet.add(d)));
+    const allDates=[...dateSet].sort();
+    if(!allDates.length) throw new Error('無資料');
+    const twStocks=stockData.filter(s=>s.mkt==='TW');
+    const latestPrice={};
+    twStocks.forEach(s=>{latestPrice[s.code]=s.avg;});
+    dailyPortfolio=[];
+    allDates.forEach(d=>{
+      twStocks.forEach(s=>{const p=priceMap[s.code][d];if(p) latestPrice[s.code]=p;});
+      const total=twStocks.reduce((sum,s)=>sum+(s.sh*(latestPrice[s.code]||0)),0);
+      if(total>0) dailyPortfolio.push({d,tw:Math.round(total)});
+    });
+    fst.textContent=`Yahoo Finance 載入完成 ✓（${dailyPortfolio.length} 個交易日）`;
+    buildAndDrawHistory();
+  }catch(e){
+    fst.textContent='走勢載入失敗：'+e.message+'（使用月快照）';
     currentData=histMonthly.map(h=>({d:h[0],tw:h[1]}));
     redrawLine();
   }
+}
+
+function buildAndDrawHistory(){
+  const dailyStart=dailyPortfolio.length?dailyPortfolio[0].d:'9999-99-99';
+  const monthOnly=histMonthly.filter(h=>h[0]<dailyStart).map(h=>({d:h[0],tw:h[1]}));
+  const merged=[...monthOnly,...dailyPortfolio].sort((a,b)=>a.d.localeCompare(b.d));
+  document.getElementById('snap-list').innerHTML=[...merged].reverse().slice(0,20).map(r=>`
+    <div class="snap-item"><span class="snap-date">${r.d}</span><span class="snap-val">NT$${r.tw.toLocaleString()}</span></div>`).join('');
+  currentData=merged;
+  redrawLine();
 }
 
 let currentData=histMonthly.map(h=>({d:h[0],tw:h[1]}));
@@ -477,17 +799,9 @@ let currentData=histMonthly.map(h=>({d:h[0],tw:h[1]}));
 function filterData(range){
   const now=new Date();
   let data=currentData;
-  if(range==='MTD'){
-    const s=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
-    data=currentData.filter(r=>r.d>=s);
-  } else if(range==='YTD'){
-    const s=new Date(now.getFullYear(),0,1).toISOString().slice(0,10);
-    data=currentData.filter(r=>r.d>=s);
-  } else if(typeof range==='number'&&range>0){
-    const c=new Date(); c.setMonth(c.getMonth()-range);
-    const s=c.toISOString().slice(0,10);
-    data=currentData.filter(r=>r.d>=s);
-  }
+  if(range==='MTD'){const s=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);data=currentData.filter(r=>r.d>=s);}
+  else if(range==='YTD'){const s=new Date(now.getFullYear(),0,1).toISOString().slice(0,10);data=currentData.filter(r=>r.d>=s);}
+  else if(typeof range==='number'&&range>0){const c=new Date();c.setMonth(c.getMonth()-range);data=currentData.filter(r=>r.d>=c.toISOString().slice(0,10));}
   return data;
 }
 
@@ -505,8 +819,7 @@ function applyCustom(){
   const from=document.getElementById('dateFrom').value;
   const to=document.getElementById('dateTo').value;
   if(!from||!to) return;
-  const data=currentData.filter(r=>r.d>=from&&r.d<=to);
-  drawLine(data);
+  drawLine(currentData.filter(r=>r.d>=from&&r.d<=to));
 }
 
 function redrawLine(){drawLine(filterData(currentRange));}
@@ -526,79 +839,29 @@ function drawLine(rows){
   const green=dark?'#00c896':'#00a876';
   const blue=dark?'#4d9fff':'#2b7de9';
   const many=rows.length>100;
-
   const datasets=[{
-    label:'台股市值',
-    data:rows.map(r=>({x:r.d,y:r.tw})),
-    borderColor:green,
-    backgroundColor:dark?'rgba(0,200,150,0.06)':'rgba(0,168,118,0.06)',
-    tension:0.2,fill:true,
-    pointRadius:many?0:3,pointHoverRadius:6,
-    borderWidth:2,yAxisID:'y'
+    label:'台股市值',data:rows.map(r=>({x:r.d,y:r.tw})),
+    borderColor:green,backgroundColor:dark?'rgba(0,200,150,0.06)':'rgba(0,168,118,0.06)',
+    tension:0.2,fill:true,pointRadius:many?0:3,pointHoverRadius:6,borderWidth:2,yAxisID:'y'
   }];
-
   const scales={
-    x:{
-      type:'category',
-      ticks:{
-        color:dark?'#4e5668':'#9ba3b5',font:{size:11},maxRotation:40,autoSkip:true,
-        maxTicksLimit:10
-      },
-      grid:{display:false},
-      border:{color:dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)'}
-    },
-    y:{
-      ticks:{color:dark?'#4e5668':'#9ba3b5',callback:v=>v>=1000000?'$'+(v/1000000).toFixed(1)+'M':'$'+(v/1000).toFixed(0)+'K',font:{size:11}},
-      grid:{color:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.05)'},
-      border:{color:dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)'}
-    }
+    x:{type:'category',ticks:{color:dark?'#4e5668':'#9ba3b5',font:{size:11},maxRotation:40,autoSkip:true,maxTicksLimit:10},grid:{display:false},border:{color:dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)'}},
+    y:{ticks:{color:dark?'#4e5668':'#9ba3b5',callback:v=>v>=1000000?'$'+(v/1000000).toFixed(1)+'M':'$'+(v/1000).toFixed(0)+'K',font:{size:11}},grid:{color:dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.05)'},border:{color:dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)'}}
   };
-
-  // 加權指數
   if(showTWII&&twiiDaily.length){
-    const twiiMap={};
-    twiiDaily.forEach(([d,v])=>{twiiMap[d]=v;});
-    // 用 forward-fill 對齊日期
+    const twiiMap={};twiiDaily.forEach(([d,v])=>{twiiMap[d]=v;});
     let lastTWII=null;
-    const twiiData=rows.map(r=>{
-      if(twiiMap[r.d]) lastTWII=twiiMap[r.d];
-      return{x:r.d,y:lastTWII};
-    });
-    datasets.push({
-      label:'加權指數',
-      data:twiiData,
-      borderColor:blue,
-      backgroundColor:'transparent',
-      tension:0.2,fill:false,
-      pointRadius:0,pointHoverRadius:5,
-      borderWidth:1.5,yAxisID:'y2'
-    });
-    scales.y2={
-      position:'right',
-      ticks:{color:dark?'#4e5668':'#9ba3b5',callback:v=>(v/1000).toFixed(0)+'K',font:{size:11}},
-      grid:{display:false},
-      border:{color:dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)'}
-    };
+    const twiiData=rows.map(r=>{if(twiiMap[r.d]) lastTWII=twiiMap[r.d];return{x:r.d,y:lastTWII};});
+    datasets.push({label:'加權指數',data:twiiData,borderColor:blue,backgroundColor:'transparent',tension:0.2,fill:false,pointRadius:0,pointHoverRadius:5,borderWidth:1.5,yAxisID:'y2'});
+    scales.y2={position:'right',ticks:{color:dark?'#4e5668':'#9ba3b5',callback:v=>(v/1000).toFixed(0)+'K',font:{size:11}},grid:{display:false},border:{color:dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)'}};
   }
-
   lineChart=new Chart(document.getElementById('lineC'),{
-    type:'line',
-    data:{datasets},
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{display:false},
-        tooltip:{callbacks:{
-          title:items=>items[0].raw.x,
-          label:c=>{
-            if(c.dataset.yAxisID==='y2') return ` 加權：${Math.round(c.raw.y).toLocaleString()} 點`;
-            return ` 台股：NT$${Math.round(c.raw.y).toLocaleString()}`;
-          }
-        }}
-      },
-      scales
-    }
+    type:'line',data:{datasets},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items[0].raw.x,label:c=>{
+        if(c.dataset.yAxisID==='y2') return ` 加權：${Math.round(c.raw.y).toLocaleString()} 點`;
+        return ` 台股：NT$${Math.round(c.raw.y).toLocaleString()}`;
+      }}}},scales}
   });
 }
 
@@ -619,11 +882,7 @@ async function doSnap(){
 function renderLending(){
   if(!lendData.length) return;
   let ts=0,ti=0,tmv=0;
-  lendData.forEach(r=>{
-    ts+=r.shares; ti+=r.income;
-    const s=stockData.find(x=>x.code===r.code);
-    if(s) tmv+=r.shares*s.price;
-  });
+  lendData.forEach(r=>{ts+=r.shares;ti+=r.income;const s=stockData.find(x=>x.code===r.code);if(s) tmv+=r.shares*s.price;});
   document.getElementById('l-sh').textContent=ts.toLocaleString();
   document.getElementById('l-inc').textContent='NT$'+Math.round(ti).toLocaleString();
   document.getElementById('l-mv').textContent=tmv?'NT$'+Math.round(tmv).toLocaleString():'—';
