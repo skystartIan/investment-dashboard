@@ -70,6 +70,11 @@ body.light .theme-toggle::after{transform:translateX(16px);background:var(--gree
 .pnl-tbl{width:100%;border-collapse:collapse}
 .pnl-tbl thead th{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;padding:0 8px 8px;text-align:right;border-bottom:1px solid var(--b)}
 .pnl-tbl thead th:first-child{text-align:left;padding-left:0}
+.th-sort{cursor:pointer;user-select:none;transition:color .15s}
+.th-sort:hover{color:var(--t2)}
+.th-sort.on{color:var(--green)}
+.th-sort.on::after{content:' ↓';font-size:9px}
+.th-sort.on.asc::after{content:' ↑';font-size:9px}
 .pnl-tbl tbody tr{border-bottom:1px solid var(--b);transition:background .1s;cursor:default}
 .pnl-tbl tbody tr:last-child{border-bottom:none}
 .pnl-tbl tbody tr:hover{background:var(--surf2)}
@@ -254,25 +259,26 @@ table.div-tbl tr:hover td{background:var(--surf2)}
     <div class="card-title">
       <span>個股損益</span>
       <div class="sort-row">
-        <button class="sort-btn on" onclick="setSortMode('pct',this)">損益%</button>
-        <button class="sort-btn" onclick="setSortMode('gain',this)">損益額</button>
-        <button class="sort-btn" onclick="setSortMode('chg',this)">今日</button>
-        <button class="sort-btn" onclick="setSortMode('mv',this)">市值</button>
+        <button class="sort-btn on" onclick="setSortMode('pct',this)" style="display:none">損益%</button>
+        <button class="sort-btn" onclick="setSortMode('gain',this)" style="display:none">損益額</button>
+        <button class="sort-btn" onclick="setSortMode('chg',this)" style="display:none">今日</button>
+        <button class="sort-btn" onclick="setSortMode('mv',this)" style="display:none">市值</button>
       </div>
     </div>
     <div class="tbl-wrap">
       <table class="pnl-tbl">
         <thead>
-          <tr>
-            <th style="text-align:left">標的</th>
-            <th>損益%</th>
-            <th>損益額</th>
-            <th title="今日漲幅 = (現價 - 昨收) / 昨收，來自 TWSE 前一交易日收盤">今日漲幅 ℹ</th>
+          <tr id="pnl-thead">
+            <th style="text-align:left;cursor:default">標的</th>
+            <th onclick="thSort('pct')" id="th-pct" class="th-sort on" title="點擊排序">損益%</th>
+            <th onclick="thSort('gain')" id="th-gain" class="th-sort" title="點擊排序">損益額</th>
+            <th onclick="thSort('chg')" id="th-chg" class="th-sort" title="點擊排序 · 今日漲幅=(現價-昨收)/昨收">今日漲幅</th>
+            <th onclick="thSort('mv')" id="th-mv" class="th-sort" title="點擊排序">市值</th>
             <th>股數</th>
             <th>均→現</th>
           </tr>
         </thead>
-        <tbody id="pnl-body"><tr><td colspan="6" class="loading">載入中...</td></tr></tbody>
+        <tbody id="pnl-body"><tr><td colspan="7" class="loading">載入中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -340,6 +346,13 @@ table.div-tbl tr:hover td{background:var(--surf2)}
         <span>我的台股</span>
         <span class="chart-leg-pct up" id="leg-my-pct"></span>
       </div>
+    </div>
+    <!-- Crosshair hover 資訊框 -->
+    <div id="chart-hover-box" style="display:none;background:var(--surf2);border:1px solid var(--b2);border-radius:7px;padding:7px 14px;margin-bottom:6px;font-size:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;min-height:32px">
+      <span id="chb-date" style="color:var(--t3);font-size:11px;font-family:var(--mono)"></span>
+      <span id="chb-my" style="color:#00c896;font-weight:600;font-family:var(--mono)"></span>
+      <span id="chb-mv" style="color:var(--t2);font-family:var(--mono)"></span>
+      <span id="chb-twii" style="color:#4d9fff;font-family:var(--mono)"></span>
     </div>
     <div class="chart-wrap" style="height:300px"><canvas id="lineC"></canvas></div>
   </div>
@@ -521,30 +534,35 @@ table.div-tbl tr:hover td{background:var(--surf2)}
     <div class="btns"><button class="btn btn-p" onclick="submitTrade()">寫入 Sheets</button></div>
   </div>
 
-  <!-- ── CSV 批次上傳 ── -->
+  <!-- ── 每日更新：上傳元大 CSV ── -->
   <div class="card">
-    <div class="card-title">批次匯入 CSV（元大庫存明細）</div>
-    <div style="font-size:12px;color:var(--t3);margin-bottom:12px;line-height:1.7">
-      從元大網頁下載的「庫存明細」CSV，直接上傳即可更新所有持股。<br>
-      <span style="color:var(--blue)">元大 → 庫存明細 → 匯出</span>
+    <div class="card-title">📤 上傳元大 CSV（每日更新）</div>
+
+    <!-- 格式選擇 -->
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="sort-btn on" id="csv-mode-pnl" onclick="setCsvMode('pnl',this)">未實現損益</button>
+      <button class="sort-btn" id="csv-mode-inv" onclick="setCsvMode('inv',this)">庫存明細</button>
+    </div>
+    <div id="csv-mode-hint" style="font-size:11px;color:var(--t3);margin-bottom:12px;line-height:1.6">
+      元大 → <b style="color:var(--t2)">未實現損益</b> → 匯出 XLS<br>
+      上傳後自動更新 holdings（股數、均價、現價）並寫入今日 prices
     </div>
 
-    <!-- 拖放 or 點擊 -->
+    <!-- 拖放區 -->
     <div id="csv-drop-zone"
-      style="border:2px dashed var(--b2);border-radius:var(--r);padding:28px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px"
+      style="border:2px dashed var(--b2);border-radius:var(--r);padding:24px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:12px"
       onclick="document.getElementById('csv-file-input').click()"
       ondragover="event.preventDefault();this.style.borderColor='var(--green)';this.style.background='var(--gbg)'"
       ondragleave="this.style.borderColor='var(--b2)';this.style.background=''"
       ondrop="handleCsvDrop(event)">
-      <div style="font-size:24px;margin-bottom:8px">📂</div>
-      <div style="font-size:13px;color:var(--t2)">點擊選擇 CSV 檔案，或拖放至此</div>
-      <div style="font-size:11px;color:var(--t3);margin-top:4px">支援 .csv、.xls（元大匯出格式）</div>
+      <div style="font-size:22px;margin-bottom:6px">📂</div>
+      <div style="font-size:13px;color:var(--t2)">點擊選擇或拖放 .xls / .csv</div>
       <input type="file" id="csv-file-input" accept=".csv,.xls,.xlsx" style="display:none" onchange="handleCsvFile(this.files[0])">
     </div>
 
-    <!-- 預覽表格 -->
+    <!-- 預覽 -->
     <div id="csv-preview" style="display:none;margin-bottom:12px">
-      <div style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px" id="csv-preview-title">解析結果預覽</div>
+      <div style="font-size:11px;color:var(--t3);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px" id="csv-preview-title"></div>
       <div class="tbl-wrap" style="max-height:200px;overflow-y:auto">
         <table class="base-tbl" id="csv-preview-table"></table>
       </div>
@@ -701,10 +719,29 @@ function dayChg(s){const p=prevPrices[s.code];return p?(s.price-p)/p*100:null;}
 function fmtPrice(v){return v>=100?Math.round(v).toLocaleString():v.toFixed(2);}
 function fmtNT(v){return'NT$'+Math.abs(Math.round(v)).toLocaleString();}
 
-function setSortMode(mode,btn){
-  sortMode=mode;
-  document.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('on'));
-  btn.classList.add('on');
+let sortDir = 'desc'; // 'asc' | 'desc'
+
+function thSort(mode){
+  if(sortMode === mode){
+    sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    sortMode = mode;
+    sortDir = 'desc';
+  }
+  // 更新表頭樣式
+  ['pct','gain','chg','mv'].forEach(m => {
+    const el = document.getElementById('th-'+m);
+    if(!el) return;
+    el.classList.toggle('on', m === sortMode);
+    el.classList.toggle('asc', m === sortMode && sortDir === 'asc');
+  });
+  renderPnlTable();
+}
+
+function setSortMode(mode, btn){
+  sortMode = mode; sortDir = 'desc';
+  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('on'));
+  if(btn) btn.classList.add('on');
   renderPnlTable();
 }
 
@@ -728,10 +765,11 @@ function renderOverview(){
 function renderPnlTable(){
   const tw=stockData.filter(s=>s.mkt==='TW');
   let sorted=[...tw];
-  if(sortMode==='pct') sorted.sort((a,b)=>pct(b)-pct(a));
-  else if(sortMode==='gain') sorted.sort((a,b)=>(b.price-b.avg)*b.sh-(a.price-a.avg)*a.sh);
-  else if(sortMode==='chg') sorted.sort((a,b)=>{const ca=dayChg(a)??-Infinity,cb=dayChg(b)??-Infinity;return cb-ca;});
-  else if(sortMode==='mv') sorted.sort((a,b)=>b.sh*b.price-a.sh*a.price);
+  const dir = sortDir==='asc' ? 1 : -1;
+  if(sortMode==='pct')  sorted.sort((a,b)=>dir*(pct(a)-pct(b)));
+  else if(sortMode==='gain') sorted.sort((a,b)=>dir*((a.price-a.avg)*a.sh-(b.price-b.avg)*b.sh));
+  else if(sortMode==='chg')  sorted.sort((a,b)=>{const ca=dayChg(a)??(-Infinity*dir),cb=dayChg(b)??(-Infinity*dir);return dir*(ca-cb);});
+  else if(sortMode==='mv')   sorted.sort((a,b)=>dir*(a.sh*a.price-b.sh*b.price));
 
   document.getElementById('pnl-body').innerHTML=sorted.map(s=>{
     const p=pct(s),up=p>=0;
@@ -748,6 +786,7 @@ function renderPnlTable(){
       <td class="pnl-pct-cell ${up?'up':'dn'}">${up?'+':''}${p.toFixed(2)}%</td>
       <td class="${up?'up':'dn'}">${up?'+':'−'}${fmtNT(gain)}</td>
       <td>${dayHtml}</td>
+      <td>${Math.round(s.sh*s.price).toLocaleString()}</td>
       <td>${s.sh.toLocaleString()}</td>
       <td style="color:var(--t3)">${fmtPrice(s.avg)}<span style="color:var(--b2);margin:0 2px">→</span><span style="color:var(--t)">${fmtPrice(s.price)}</span></td>
     </tr>`;
@@ -1064,31 +1103,35 @@ function drawLine(rows){
       plugins:{
         legend:{display:false},
         tooltip:{
-          enabled:true,
-          backgroundColor:tooltipBg,
-          borderColor:tooltipBorder,
-          borderWidth:1,
-          padding:10,
-          titleColor:dark?'#8b92a5':'#5a6278',
-          bodyColor:dark?'#f0f2f5':'#1a1d24',
-          bodyFont:{family:"'DM Mono',monospace",size:13},
-          titleFont:{family:"'Sora',sans-serif",size:11},
-          displayColors:true,
-          boxWidth:10,boxHeight:10,
-          callbacks:{
-            title:items=>fmtXLabel(items[0].label),
-            label:c=>{
-              const v=c.raw;
-              if(v==null) return null;
-              const pctStr=(v>=0?'+':'')+v.toFixed(2)+'%';
-              // 同時顯示實際市值（只有我的台股有）
-              if(c.dataset.label==='我的台股'){
-                const rowIdx=c.dataIndex;
-                const actualVal=rows[rowIdx]?.tw;
-                const valStr=actualVal?'  NT$'+Math.round(actualVal).toLocaleString():'';
-                return ` ${c.dataset.label}  ${pctStr}${valStr}`;
-              }
-              return ` ${c.dataset.label}  ${pctStr}`;
+          enabled:false,  // 關掉原生 tooltip，改用上方 hover box
+          external(context){
+            const hb = document.getElementById('chart-hover-box');
+            const {chart, tooltip} = context;
+            if(tooltip.opacity === 0 || !tooltip.dataPoints?.length){
+              hb.style.display = 'none';
+              return;
+            }
+            hb.style.display = 'flex';
+            const dp = tooltip.dataPoints[0];
+            const idx = dp.dataIndex;
+            // 日期
+            document.getElementById('chb-date').textContent = fmtXLabel(dp.label);
+            // 我的台股
+            const myDp = tooltip.dataPoints.find(p => p.dataset.label === '我的台股');
+            if(myDp){
+              const v = myDp.raw;
+              const pctStr = (v>=0?'+':'') + v.toFixed(2)+'%';
+              document.getElementById('chb-my').textContent = '我的台股 ' + pctStr;
+              const actualVal = rows[idx]?.tw;
+              document.getElementById('chb-mv').textContent = actualVal ? 'NT$'+Math.round(actualVal).toLocaleString() : '';
+            }
+            // 大盤
+            const twiiDp = tooltip.dataPoints.find(p => p.dataset.label === '加權指數');
+            if(twiiDp && twiiDp.raw != null){
+              const tv = twiiDp.raw;
+              document.getElementById('chb-twii').textContent = '大盤 '+(tv>=0?'+':'')+tv.toFixed(2)+'%';
+            } else {
+              document.getElementById('chb-twii').textContent = '';
             }
           }
         }
@@ -1118,7 +1161,25 @@ function drawLine(rows){
           }
         }
       }
-    }
+    },
+    plugins:[{
+      // Crosshair：垂直線
+      id:'crosshair',
+      afterDraw(chart){
+        const {ctx, chartArea, scales, tooltip} = chart;
+        if(!tooltip._active?.length) return;
+        const x = tooltip._active[0].element.x;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x, chartArea.top);
+        ctx.lineTo(x, chartArea.bottom);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = dark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
+        ctx.setLineDash([3,3]);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }]
   });
 
   // 更新圖例
@@ -1454,110 +1515,188 @@ async function submitTrade(){
 }
 
 // ──────────────────────────────
-// CSV 批次匯入
+// CSV 上傳（每日更新）
 // ──────────────────────────────
-let parsedCsvRows=null;
+let parsedCsvRows = null;   // holdings 格式
+let parsedPriceRow = null;  // {date, prices: {code: price}}
+let csvMode = 'pnl';        // 'pnl'=未實現損益, 'inv'=庫存明細
+
+const CSV_MODE_HINTS = {
+  pnl: '元大 → <b style="color:var(--t2)">未實現損益</b> → 匯出 XLS<br>上傳後自動更新 holdings（股數、均價、現價）並寫入今日 prices',
+  inv: '元大 → <b style="color:var(--t2)">庫存明細</b> → 匯出 XLS<br>上傳後僅更新 holdings 持股數與均價',
+};
+
+function setCsvMode(mode, btn){
+  csvMode = mode;
+  document.querySelectorAll('#csv-mode-pnl, #csv-mode-inv').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('csv-mode-hint').innerHTML = CSV_MODE_HINTS[mode];
+  clearCsvPreview();
+}
 
 function handleCsvDrop(e){
   e.preventDefault();
-  const file=e.dataTransfer.files[0];
-  document.getElementById('csv-drop-zone').style.borderColor='var(--b2)';
-  document.getElementById('csv-drop-zone').style.background='';
+  document.getElementById('csv-drop-zone').style.borderColor = 'var(--b2)';
+  document.getElementById('csv-drop-zone').style.background = '';
+  const file = e.dataTransfer.files[0];
   if(file) handleCsvFile(file);
 }
 
 function handleCsvFile(file){
   if(!file) return;
-  const st=document.getElementById('st-csv');
-  st.textContent='解析中...';st.className='status';
-  const reader=new FileReader();
-  reader.onload=e=>{
+  const st = document.getElementById('st-csv');
+  st.textContent = '解析中...'; st.className = 'status';
+  const reader = new FileReader();
+  reader.onload = e => {
     try{
-      const text=e.target.result;
-      parsedCsvRows=parseYuantaCsv(text);
-      showCsvPreview(parsedCsvRows);
-      st.textContent=`解析完成：${parsedCsvRows.length-1} 筆持股`;
-      st.className='status ok';
+      const text = e.target.result;
+      if(csvMode === 'pnl'){
+        const result = parseYuantaPnlCsv(text);
+        parsedCsvRows = result.holdings;
+        parsedPriceRow = result.priceRow;
+        showCsvPreview(parsedCsvRows, result.totalMv);
+        st.textContent = `解析完成：${parsedCsvRows.length-1} 筆持股，總市值 NT$${Math.round(result.totalMv).toLocaleString()}`;
+        st.className = 'status ok';
+      } else {
+        parsedCsvRows = parseYuantaInvCsv(text);
+        parsedPriceRow = null;
+        showCsvPreview(parsedCsvRows, null);
+        st.textContent = `解析完成：${parsedCsvRows.length-1} 筆持股`;
+        st.className = 'status ok';
+      }
     }catch(err){
-      st.textContent='解析失敗：'+err.message;
-      st.className='status err';
+      st.textContent = '解析失敗：' + err.message;
+      st.className = 'status err';
     }
   };
-  // 嘗試 UTF-8，失敗自動 fallback
-  reader.readAsText(file,'utf-8');
+  reader.readAsText(file, 'utf-8');
 }
 
-function parseYuantaCsv(text){
-  // 處理 BOM
-  if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
-  const lines=text.split(/\r?\n/).filter(l=>l.trim());
-  const rows=[['ticker','market','shares','avg_cost','current_price','name']];
+// ── 解析「未實現損益」XLS ──
+// 欄位：代號(1), 名稱(2), 庫存數量(4), 現價(5), 市值(6), 成本金額(7), 平均單價(8)
+function parseYuantaPnlCsv(text){
+  const tables = new DOMParser().parseFromString(text, 'text/html').querySelectorAll('table');
+  const table = tables[0];
+  if(!table) throw new Error('找不到表格');
 
-  let iCode=-1,iName=-1,iSh=-1,iAvg=-1,iPrice=-1;
+  const rows = [...table.querySelectorAll('tr')];
+  const holdings = [['ticker','market','shares','avg_cost','current_price','name']];
+  let totalMv = 0;
+  const today = new Date().toISOString().slice(0,10);
+  const priceRow = {date: today, prices: {}};
+
+  rows.forEach(tr => {
+    const cells = [...tr.querySelectorAll('td')].map(td => td.textContent.trim());
+    if(cells.length < 9) return;
+    const code = cells[1].replace(/\*/g,'').trim().padStart(4,'0');
+    if(!/^\d{4}$/.test(code)) return;
+    const name  = cells[2].replace(/\*/g,'').trim();
+    const qty   = parseInt(cells[4].replace(/,/g,''));
+    const price = parseFloat(cells[5].replace(/,/g,''));
+    const mv    = parseFloat(cells[6].replace(/,/g,''));
+    const avg   = parseFloat(cells[8].replace(/,/g,''));
+    if(isNaN(qty)||isNaN(price)||isNaN(avg)) return;
+    holdings.push([code,'TW',qty,avg,price,name]);
+    priceRow.prices[code] = price;
+    totalMv += mv;
+  });
+
+  return {holdings, priceRow, totalMv};
+}
+
+// ── 解析「庫存明細」XLS（舊格式）──
+function parseYuantaInvCsv(text){
+  if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  const rows = [['ticker','market','shares','avg_cost','current_price','name']];
+  let iCode=-1, iName=-1, iSh=-1, iAvg=-1, iPrice=-1;
 
   for(const line of lines){
-    const cols=line.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
-    if(iCode===-1){
-      // 找 header 行
-      const flat=cols.map(c=>c);
-      iCode=flat.findIndex(c=>c.includes('代號')||c==='代號');
-      iName=flat.findIndex(c=>c.includes('名稱'));
-      iSh=flat.findIndex(c=>c.includes('庫存')||c.includes('股數'));
-      iAvg=flat.findIndex(c=>c.includes('均價')||c.includes('成本'));
-      iPrice=flat.findIndex(c=>c.includes('現價')||c.includes('收盤')||c.includes('市價'));
-      if(iCode>=0) continue; // 找到 header
+    const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g,''));
+    if(iCode === -1){
+      const flat = cols.map(c => c);
+      iCode  = flat.findIndex(c => c.includes('代號'));
+      iName  = flat.findIndex(c => c.includes('名稱'));
+      iSh    = flat.findIndex(c => c.includes('庫存')||c.includes('股數'));
+      iAvg   = flat.findIndex(c => c.includes('均價')||c.includes('成本'));
+      iPrice = flat.findIndex(c => c.includes('現價')||c.includes('收盤'));
+      if(iCode >= 0) continue;
     }
-    if(iCode<0||!cols[iCode]) continue;
-    const code=cols[iCode].trim().padStart(4,'0').replace('*','');
-    const name=iName>=0?cols[iName].trim().replace('*',''):'';
-    const sh=iSh>=0?parseFloat(cols[iSh].replace(/,/g,'')):0;
-    const avg=iAvg>=0?parseFloat(cols[iAvg].replace(/,/g,'')):0;
-    const price=iPrice>=0?parseFloat(cols[iPrice].replace(/,/g,'')):avg;
-    if(!code||code==='代號'||isNaN(sh)||sh<=0) continue;
+    if(iCode < 0 || !cols[iCode]) continue;
+    const code  = cols[iCode].trim().padStart(4,'0').replace('*','');
+    const name  = iName >= 0 ? cols[iName].trim().replace('*','') : '';
+    const sh    = iSh >= 0 ? parseFloat(cols[iSh].replace(/,/g,'')) : 0;
+    const avg   = iAvg >= 0 ? parseFloat(cols[iAvg].replace(/,/g,'')) : 0;
+    const price = iPrice >= 0 ? parseFloat(cols[iPrice].replace(/,/g,'')) : avg;
+    if(!code || code === '代號' || isNaN(sh) || sh <= 0) continue;
     rows.push([code,'TW',Math.round(sh),isNaN(avg)?0:+avg.toFixed(4),isNaN(price)?0:+price.toFixed(2),name]);
   }
   return rows;
 }
 
-function showCsvPreview(rows){
-  document.getElementById('csv-preview').style.display='block';
-  document.getElementById('csv-upload-btn').style.display='inline-flex';
-  const tbl=document.getElementById('csv-preview-table');
-  const head=rows[0];
-  const data=rows.slice(1).slice(0,10); // 最多預覽10筆
-  tbl.innerHTML=`<thead><tr>${head.map(h=>`<th style="text-align:left">${h}</th>`).join('')}</tr></thead>
-  <tbody>${data.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>`;
-  document.getElementById('csv-preview-title').textContent=`解析結果（共 ${rows.length-1} 筆${rows.length-1>10?'，顯示前10筆':''}）`;
+function showCsvPreview(rows, totalMv){
+  document.getElementById('csv-preview').style.display = 'block';
+  document.getElementById('csv-upload-btn').style.display = 'inline-flex';
+  const tbl = document.getElementById('csv-preview-table');
+  const head = rows[0];
+  const data = rows.slice(1).slice(0,8);
+  const totalStr = totalMv ? `<tr style="background:var(--gbg)"><td colspan="${head.length}" style="font-family:var(--mono);color:var(--green);padding:6px 10px">總市值 NT$${Math.round(totalMv).toLocaleString()}</td></tr>` : '';
+  tbl.innerHTML = `<thead><tr>${head.map(h=>`<th style="text-align:left">${h}</th>`).join('')}</tr></thead>
+    <tbody>${data.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}${totalStr}</tbody>`;
+  document.getElementById('csv-preview-title').textContent = `預覽（共 ${rows.length-1} 筆${rows.length-1>8?'，顯示前8筆':''}）`;
 }
 
 function clearCsvPreview(){
-  parsedCsvRows=null;
-  document.getElementById('csv-preview').style.display='none';
-  document.getElementById('csv-upload-btn').style.display='none';
-  document.getElementById('st-csv').textContent='';
-  document.getElementById('csv-file-input').value='';
+  parsedCsvRows = null; parsedPriceRow = null;
+  document.getElementById('csv-preview').style.display = 'none';
+  document.getElementById('csv-upload-btn').style.display = 'none';
+  document.getElementById('st-csv').textContent = '';
+  document.getElementById('csv-file-input').value = '';
 }
 
 async function uploadCsvToSheets(){
-  if(!parsedCsvRows||parsedCsvRows.length<2){
-    document.getElementById('st-csv').textContent='沒有可寫入的資料';
-    document.getElementById('st-csv').className='status err';
+  if(!parsedCsvRows || parsedCsvRows.length < 2){
+    document.getElementById('st-csv').textContent = '沒有可寫入的資料';
+    document.getElementById('st-csv').className = 'status err';
     return;
   }
-  const st=document.getElementById('st-csv'),pb=document.getElementById('prog-csv');
-  st.textContent='寫入中...';st.className='status';pb.style.width='30%';
+  const st = document.getElementById('st-csv'), pb = document.getElementById('prog-csv');
+  st.textContent = '寫入中...'; st.className = 'status'; pb.style.width = '20%';
+
   try{
-    const res=await gas({action:'write',sheet:'holdings',rows:parsedCsvRows});
+    // 1. 更新 holdings
+    const res = await gas({action:'write', sheet:'holdings', rows:parsedCsvRows});
     if(!res.ok) throw new Error(res.error);
-    pb.style.width='100%';
-    st.textContent=`✓ 已寫入 ${parsedCsvRows.length-1} 筆持股到 Sheets`;
-    st.className='status ok';
+    pb.style.width = '60%';
+
+    // 2. 如果是未實現損益格式，同時更新 prices 今日收盤
+    if(parsedPriceRow && Object.keys(parsedPriceRow.prices).length > 0){
+      const today = parsedPriceRow.date;
+      const pricePayload = {
+        action: 'write_day_prices',
+        date: today,
+        prices: parsedPriceRow.prices
+      };
+      const res2 = await gas(pricePayload);
+      pb.style.width = '90%';
+      if(res2.ok){
+        st.textContent = `✓ holdings + prices(${today}) 已更新`;
+      } else {
+        st.textContent = `✓ holdings 已更新（prices 寫入失敗：${res2.error}）`;
+      }
+    } else {
+      st.textContent = `✓ holdings 已更新（${parsedCsvRows.length-1} 筆）`;
+    }
+
+    pb.style.width = '100%';
+    st.className = 'status ok';
     clearCsvPreview();
-    setTimeout(()=>refresh(),800);
+    setTimeout(() => refresh(), 800);
+
   }catch(e){
-    st.textContent='寫入失敗：'+e.message;
-    st.className='status err';
-    pb.style.width='0%';
+    st.textContent = '寫入失敗：' + e.message;
+    st.className = 'status err';
+    pb.style.width = '0%';
   }
 }
 
