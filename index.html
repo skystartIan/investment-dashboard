@@ -347,14 +347,21 @@ table.div-tbl tr:hover td{background:var(--surf2)}
         <span class="chart-leg-pct up" id="leg-my-pct"></span>
       </div>
     </div>
-    <!-- Crosshair hover 資訊框 -->
-    <div id="chart-hover-box" style="display:none;background:var(--surf2);border:1px solid var(--b2);border-radius:7px;padding:7px 14px;margin-bottom:6px;font-size:12px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;min-height:32px">
-      <span id="chb-date" style="color:var(--t3);font-size:11px;font-family:var(--mono)"></span>
-      <span id="chb-my" style="color:#00c896;font-weight:600;font-family:var(--mono)"></span>
-      <span id="chb-mv" style="color:var(--t2);font-family:var(--mono)"></span>
-      <span id="chb-twii" style="color:#4d9fff;font-family:var(--mono)"></span>
+    <!-- 圖表區：相對定位，讓懸浮框可以 absolute 貼在右上角 -->
+    <div style="position:relative">
+      <!-- 懸浮 hover 資訊框（右上角，滑鼠移入圖表才顯示） -->
+      <div id="chart-hover-box" style="display:none;position:absolute;top:8px;right:52px;z-index:10;background:var(--surf);border:1px solid var(--b2);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:220px">
+        <div id="chb-date" style="color:var(--t3);font-size:10px;font-family:var(--mono);margin-bottom:4px;letter-spacing:.03em"></div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div style="display:flex;justify-content:space-between;gap:16px">
+            <span style="color:#00c896;font-family:var(--mono);font-weight:600" id="chb-my"></span>
+            <span style="color:var(--t2);font-family:var(--mono)" id="chb-mv"></span>
+          </div>
+          <div id="chb-twii" style="color:#4d9fff;font-family:var(--mono);font-size:11px"></div>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:300px"><canvas id="lineC"></canvas></div>
     </div>
-    <div class="chart-wrap" style="height:300px"><canvas id="lineC"></canvas></div>
   </div>
   <div id="snap-list"></div>
 </div>
@@ -630,6 +637,7 @@ const FREQ_TIMES={Q:4,H:2,A:1};
 let stockData=[], lendData=[];
 let lineChart=null, pieChart=null;
 let dailyPortfolio=[], twiiDaily=[], currentRange=0, showTWII=false;
+let chartRows=[];  // 當前走勢圖的資料列（供 hover callback 讀取）
 let currentData=histMonthly.map(h=>({d:h[0],tw:h[1]}));
 let sortMode='pct', prevPrices={}, divYearFilter='2025';
 let tradeSide='buy', useManualStock=false;
@@ -800,7 +808,7 @@ function renderHoldings(){
   const total=tw.reduce((s,x)=>s+x.sh*x.price,0);
   const dark=document.body.classList.contains('dark');
 
-  document.getElementById('pie-total').textContent='NT$'+Math.round(total/10000).toLocaleString()+'萬';
+  document.getElementById('pie-total').textContent='NT$'+Math.round(total/10000)+'萬';
 
   pieChart=new Chart(document.getElementById('pieC'),{
     type:'doughnut',
@@ -1045,6 +1053,7 @@ function updateLegend(rows){
 function drawLine(rows){
   if(lineChart) lineChart.destroy();
   if(!rows||rows.length<2) return;
+  chartRows = rows;  // 存到全域供 hover callback 使用
   const dark=document.body.classList.contains('dark');
 
   // Normalize 成百分比（相對第一個資料點）
@@ -1106,26 +1115,22 @@ function drawLine(rows){
           enabled:false,  // 關掉原生 tooltip，改用上方 hover box
           external(context){
             const hb = document.getElementById('chart-hover-box');
-            const {chart, tooltip} = context;
+            const {tooltip} = context;
             if(tooltip.opacity === 0 || !tooltip.dataPoints?.length){
               hb.style.display = 'none';
               return;
             }
-            hb.style.display = 'flex';
+            hb.style.display = 'block';
             const dp = tooltip.dataPoints[0];
             const idx = dp.dataIndex;
-            // 日期
             document.getElementById('chb-date').textContent = fmtXLabel(dp.label);
-            // 我的台股
             const myDp = tooltip.dataPoints.find(p => p.dataset.label === '我的台股');
-            if(myDp){
+            if(myDp && myDp.raw != null){
               const v = myDp.raw;
-              const pctStr = (v>=0?'+':'') + v.toFixed(2)+'%';
-              document.getElementById('chb-my').textContent = '我的台股 ' + pctStr;
-              const actualVal = rows[idx]?.tw;
+              document.getElementById('chb-my').textContent = '我的台股 ' + (v>=0?'+':'') + v.toFixed(2)+'%';
+              const actualVal = chartRows[idx]?.tw;
               document.getElementById('chb-mv').textContent = actualVal ? 'NT$'+Math.round(actualVal).toLocaleString() : '';
             }
-            // 大盤
             const twiiDp = tooltip.dataPoints.find(p => p.dataset.label === '加權指數');
             if(twiiDp && twiiDp.raw != null){
               const tv = twiiDp.raw;
