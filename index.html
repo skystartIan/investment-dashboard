@@ -9,15 +9,15 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--font:'Sora',sans-serif;--mono:'DM Mono',monospace;--r:14px;--r-sm:8px}
-body.dark{--bg:#0d0f12;--surf:#161920;--surf2:#1e222d;--b:rgba(255,255,255,0.07);--b2:rgba(255,255,255,0.13);--t:#f0f2f5;--t2:#8b92a5;--t3:#4e5668;--green:#00c896;--gbg:rgba(0,200,150,0.12);--red:#ff5c6a;--rbg:rgba(255,92,106,0.12);--blue:#4d9fff;--btn:#1e222d;--shadow:none}
-body.light{--bg:#f0f2f5;--surf:#ffffff;--surf2:#f4f6f9;--b:rgba(0,0,0,0.07);--b2:rgba(0,0,0,0.12);--t:#1a1d24;--t2:#5a6278;--t3:#9ba3b5;--green:#00a876;--gbg:rgba(0,168,118,0.08);--red:#e03444;--rbg:rgba(224,52,68,0.08);--blue:#2b7de9;--btn:#f0f2f5;--shadow:0 1px 6px rgba(0,0,0,0.07)}
+body.dark{--bg:#0d0f12;--surf:#161920;--surf2:#1e222d;--b:rgba(255,255,255,0.07);--b2:rgba(255,255,255,0.13);--t:#f0f2f5;--t2:#c8ccda;--t3:#8b92a5;--up:#ff5c6a;--dn:#00c896;--green:#00c896;--gbg:rgba(0,200,150,0.12);--red:#ff5c6a;--rbg:rgba(255,92,106,0.12);--blue:#4d9fff;--btn:#1e222d;--shadow:none}
+body.light{--bg:#f0f2f5;--surf:#ffffff;--surf2:#f4f6f9;--b:rgba(0,0,0,0.07);--b2:rgba(0,0,0,0.12);--t:#1a1d24;--t2:#3a4258;--t3:#5a6278;--up:#e03444;--dn:#00a876;--green:#00a876;--gbg:rgba(0,168,118,0.08);--red:#e03444;--rbg:rgba(224,52,68,0.08);--blue:#2b7de9;--btn:#f0f2f5;--shadow:0 1px 6px rgba(0,0,0,0.07)}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--t);font-family:var(--font);font-size:15px;min-height:100vh;transition:background .25s,color .25s}
+body{background:var(--bg);color:var(--t);font-family:var(--font);font-size:16px;min-height:100vh;transition:background .25s,color .25s}
 
 /* ── Header ── */
 .header{padding:16px 16px 0;display:flex;justify-content:space-between;align-items:center}
 .header-title{font-size:15px;font-weight:600;letter-spacing:.03em}
-.header-date{font-family:var(--mono);font-size:11px;color:var(--t3);margin-top:2px}
+.header-date{font-family:var(--mono);font-size:12px;color:var(--t2);margin-top:2px}
 .header-right{display:flex;gap:8px;align-items:center}
 .theme-toggle{width:38px;height:22px;background:var(--surf2);border:1px solid var(--b2);border-radius:11px;cursor:pointer;position:relative;flex-shrink:0}
 .theme-toggle::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--t3);transition:transform .2s,background .2s}
@@ -29,7 +29,7 @@ body.light .theme-toggle::after{transform:translateX(16px);background:var(--gree
 /* ── Nav ── */
 .nav{display:flex;gap:0;padding:12px 16px 0;border-bottom:1px solid var(--b);overflow-x:auto}
 .nav::-webkit-scrollbar{display:none}
-.nav-item{padding:8px 14px;font-size:13px;cursor:pointer;color:var(--t2);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s;white-space:nowrap}
+.nav-item{padding:8px 14px;font-size:15px;cursor:pointer;color:var(--t2);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s;white-space:nowrap}
 .nav-item:hover{color:var(--t)}
 .nav-item.on{color:var(--green);border-bottom-color:var(--green);font-weight:600}
 .panel{display:none;padding:16px}.panel.on{display:block}
@@ -38,14 +38,14 @@ body.light .theme-toggle::after{transform:translateX(16px);background:var(--gree
 .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
 @media(min-width:600px){.metrics{grid-template-columns:repeat(4,1fr)}}
 .mc{background:var(--surf);border:1px solid var(--b);border-radius:var(--r);padding:14px 16px;box-shadow:var(--shadow)}
-.mc-l{font-size:11px;color:var(--t3);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.mc-l{font-size:13px;color:var(--t2);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
 .mc-v{font-family:var(--mono);font-size:20px;font-weight:500;line-height:1}
-.mc-s{font-size:12px;margin-top:4px;color:var(--t3)}
-.up{color:var(--green)!important}.dn{color:var(--red)!important}
+.mc-s{font-size:13px;margin-top:4px;color:var(--t2)}
+.up{color:var(--up)!important}.dn{color:var(--dn)!important}
 
 /* ── Card ── */
 .card{background:var(--surf);border:1px solid var(--b);border-radius:var(--r);padding:16px;margin-bottom:14px;box-shadow:var(--shadow)}
-.card-title{font-size:11px;color:var(--t3);margin-bottom:14px;letter-spacing:.06em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
+.card-title{font-size:13px;color:var(--t2);margin-bottom:14px;letter-spacing:.06em;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
 .chart-wrap{position:relative;width:100%}
 
 /* ── Range buttons ── */
@@ -59,35 +59,35 @@ body.light .theme-toggle::after{transform:translateX(16px);background:var(--gree
 
 /* ── 走勢圖：Yahoo 風格 ── */
 .chart-legend-row{display:flex;gap:14px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
-.chart-leg{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t2)}
+.chart-leg{display:flex;align-items:center;gap:5px;font-size:14px;color:var(--t)}
 .chart-leg-line{width:18px;height:2px;border-radius:1px;flex-shrink:0}
 .chart-leg-pct{font-family:var(--mono);font-size:12px;font-weight:600;margin-left:4px}
 .twii-cb-wrap{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t2);cursor:pointer}
 .twii-cb-wrap input{accent-color:var(--blue);width:14px;height:14px;cursor:pointer}
-.fetch-st{font-size:11px;color:var(--t3);margin:4px 0 8px;font-family:var(--mono);min-height:14px}
+.fetch-st{font-size:12px;color:var(--t2);margin:4px 0 8px;font-family:var(--mono);min-height:14px}
 
 /* ── 個股損益：緊湊表格 ── */
 .pnl-tbl{width:100%;border-collapse:collapse}
-.pnl-tbl thead th{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;padding:0 8px 8px;text-align:right;border-bottom:1px solid var(--b)}
+.pnl-tbl thead th{font-size:12px;font-weight:600;color:var(--t2);letter-spacing:.06em;text-transform:uppercase;padding:0 8px 8px;text-align:right;border-bottom:1px solid var(--b)}
 .pnl-tbl thead th:first-child{text-align:left;padding-left:0}
 .th-sort{cursor:pointer;user-select:none;transition:color .15s}
 .th-sort:hover{color:var(--t2)}
 .th-sort.on{color:var(--green)}
-.th-sort.on::after{content:' ↓';font-size:9px}
-.th-sort.on.asc::after{content:' ↑';font-size:9px}
+.th-sort.on::after{content:' ↓';font-size:11px}
+.th-sort.on.asc::after{content:' ↑';font-size:11px}
 .pnl-tbl tbody tr{border-bottom:1px solid var(--b);transition:background .1s;cursor:default}
 .pnl-tbl tbody tr:last-child{border-bottom:none}
 .pnl-tbl tbody tr:hover{background:var(--surf2)}
-.pnl-tbl tbody td{padding:9px 8px;vertical-align:middle;font-family:var(--mono);font-size:12px;color:var(--t2);text-align:right;white-space:nowrap}
+.pnl-tbl tbody td{padding:10px 8px;vertical-align:middle;font-family:var(--mono);font-size:14px;color:var(--t);text-align:right;white-space:nowrap}
 .pnl-tbl tbody td:first-child{text-align:left;padding-left:0}
 .pnl-name-wrap{display:flex;flex-direction:column;gap:1px}
-.pnl-nm{font-family:var(--font);font-size:13px;font-weight:600;color:var(--t)}
-.pnl-cd{font-size:10px;color:var(--t3);font-family:var(--mono)}
-.pnl-pct-cell{font-size:14px;font-weight:600}
-.day-badge{display:inline-block;font-size:10px;font-family:var(--mono);padding:1px 5px;border-radius:3px}
-.day-up{background:var(--gbg);color:var(--green)}
-.day-dn{background:var(--rbg);color:var(--red)}
-.day-na{color:var(--t3)}
+.pnl-nm{font-family:var(--font);font-size:15px;font-weight:600;color:var(--t)}
+.pnl-cd{font-size:12px;color:var(--t2);font-family:var(--mono)}
+.pnl-pct-cell{font-size:15px;font-weight:700}
+.day-badge{display:inline-block;font-size:12px;font-family:var(--mono);padding:2px 7px;border-radius:4px;font-weight:600}
+
+
+.day-na{color:var(--t2);font-size:14px}
 .sort-row{display:flex;gap:4px}
 .sort-btn{background:transparent;border:1px solid var(--b2);color:var(--t3);padding:2px 8px;border-radius:5px;font-size:11px;cursor:pointer;font-family:var(--font);transition:all .12s}
 .sort-btn.on{background:var(--gbg);border-color:var(--green);color:var(--green);font-weight:600}
@@ -786,7 +786,7 @@ function renderPnlTable(){
     let dayHtml='';
     if(chg!==null){
       const cup=chg>=0;
-      dayHtml=`<span class="day-badge ${cup?'day-up':'day-dn'}">${cup?'▲':'▼'}${Math.abs(chg).toFixed(2)}%</span>`;
+      dayHtml=`<span class="day-badge" style="background:${cup?'var(--rbg)':'var(--gbg)'};color:${cup?'var(--up)':'var(--dn)'}">${cup?'▲':'▼'}${Math.abs(chg).toFixed(2)}%</span>`;
     } else dayHtml=`<span class="day-na">—</span>`;
 
     return`<tr>
@@ -796,7 +796,12 @@ function renderPnlTable(){
       <td>${dayHtml}</td>
       <td>${Math.round(s.sh*s.price).toLocaleString()}</td>
       <td>${s.sh.toLocaleString()}</td>
-      <td style="color:var(--t3)">${fmtPrice(s.avg)}<span style="color:var(--b2);margin:0 2px">→</span><span style="color:var(--t)">${fmtPrice(s.price)}</span></td>
+      <td>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <span style="color:var(--t);font-weight:600">${fmtPrice(s.price)}</span>
+          <span style="color:var(--t2);font-size:12px">均 ${fmtPrice(s.avg)}</span>
+        </div>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -1387,8 +1392,36 @@ async function addLending(){
 let stockLookup={};  // {code: name}
 let nameLookup={};   // keywords for name search
 
+// 常用台股代號→名稱靜態表（補充 stockData 沒有的標的）
+const KNOWN_STOCKS={
+  '0050':'元大台灣50','0056':'元大高股息','00878':'國泰永續高股息',
+  '00919':'群益台灣精選高息','00929':'復華台灣科技優息',
+  '1101':'台泥','1216':'統一','1301':'台塑','1303':'南亞','1326':'台化',
+  '1402':'遠東新','1514':'亞力','1519':'華城','1605':'華新','1722':'台肥',
+  '1815':'富喬','2002':'中鋼','2105':'正新','2207':'和泰車','2303':'聯電',
+  '2308':'台達電','2313':'華通','2317':'鴻海','2327':'國巨','2330':'台積電',
+  '2344':'華邦電','2345':'智邦','2347':'聯強','2354':'鴻準','2357':'華碩',
+  '2360':'致茂','2376':'技嘉','2377':'微星','2379':'瑞昱','2382':'廣達',
+  '2383':'台光電','2395':'研華','2404':'漢唐','2408':'南亞科','2412':'中華電',
+  '2454':'聯發科','2474':'可成','2481':'強茂','2492':'華新科','2498':'宏達電',
+  '2603':'長榮','2609':'陽明','2615':'萬海','2618':'長榮航','2633':'台灣高鐵',
+  '3017':'奇鋐','3026':'禾伸堂','3034':'聯詠','3035':'智原','3045':'台灣大',
+  '3167':'大量','3260':'威剛','3363':'上詮','3443':'創意','3481':'群創',
+  '3491':'昇達科','3494':'誠研','3653':'健策','3675':'德微','3697':'晶彩科',
+  '4904':'遠傳','4909':'新復興','5425':'台半','5498':'凱崴','6239':'力成',
+  '6285':'啟碁','6446':'藥華藥','6510':'精測','6531':'愛普','6669':'緯穎',
+  '6770':'力積電','6807':'誠志股份','6944':'兆聯實業','8021':'尖點',
+  '8069':'元太','8096':'高精特','8299':'群聯','8996':'高力',
+};
+
 function buildStockLookup(){
   stockLookup={};nameLookup={};
+  // 先放靜態表
+  Object.entries(KNOWN_STOCKS).forEach(([code,name])=>{
+    stockLookup[code]=name;
+    nameLookup[name]={code,name};
+  });
+  // 再用持倉覆蓋（最新）
   stockData.forEach(s=>{
     stockLookup[s.code]=s.name;
     nameLookup[s.name]={code:s.code,name:s.name};
@@ -1424,9 +1457,14 @@ function onNameInput(){
 function showNameDropdown(q=''){
   const dd=document.getElementById('name-dropdown');
   const q2=q||document.getElementById('fn').value.trim().toLowerCase();
-  const matches=stockData.filter(s=>
-    s.name.toLowerCase().includes(q2)||s.code.includes(q2)
-  ).slice(0,8);
+  // 先搜尋持倉，再搜靜態表
+  const fromHoldings=stockData.filter(s=>s.name.includes(q2)||s.code.includes(q2));
+  const fromKnown=Object.entries(stockLookup)
+    .filter(([c,n])=>n.includes(q2)||c.includes(q2))
+    .map(([c,n])=>({code:c,name:n}));
+  const seen=new Set(fromHoldings.map(s=>s.code));
+  const extra=fromKnown.filter(x=>!seen.has(x.code)).slice(0,6);
+  const matches=[...fromHoldings,...extra].slice(0,8);
   if(!matches.length){dd.style.display='none';return;}
   dd.innerHTML=matches.map(s=>`
     <div onclick="selectStock('${s.code}','${s.name}')"
