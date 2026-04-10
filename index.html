@@ -1782,7 +1782,9 @@ function clearCsvPreview(){
 }
 
 async function uploadCsvToSheets(){
-  if(!parsedCsvRows || parsedCsvRows.length < 2){
+  // trades 模式：object array，length >= 1 即可；pnl 模式：含 header row，length >= 2
+  const minLen = csvMode === 'trades' ? 1 : 2;
+  if(!parsedCsvRows || parsedCsvRows.length < minLen){
     document.getElementById('st-csv').textContent = '沒有可寫入的資料';
     document.getElementById('st-csv').className = 'status err';
     return;
