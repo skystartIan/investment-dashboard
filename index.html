@@ -548,7 +548,7 @@ table.div-tbl tr:hover td{background:var(--surf2)}
     <!-- 格式選擇 -->
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <button class="sort-btn on" id="csv-mode-pnl" onclick="setCsvMode('pnl',this)">未實現損益</button>
-      <button class="sort-btn" id="csv-mode-inv" onclick="setCsvMode('inv',this)">庫存明細</button>
+      <button class="sort-btn" id="csv-mode-trades" onclick="setCsvMode('trades',this)">投資明細</button>
     </div>
     <div id="csv-mode-hint" style="font-size:11px;color:var(--t3);margin-bottom:12px;line-height:1.6">
       元大 → <b style="color:var(--t2)">未實現損益</b> → 匯出 XLS<br>
@@ -1573,15 +1573,15 @@ let parsedPriceRow = null;  // {date, prices: {code: price}}
 let csvMode = 'pnl';        // 'pnl'=未實現損益, 'inv'=庫存明細
 
 const CSV_MODE_HINTS = {
-  pnl: '元大 → <b style="color:var(--t2)">未實現損益</b> → 匯出 XLS<br>上傳後自動更新 holdings（股數、均價、現價）並寫入今日 prices',
-  inv: '元大 → <b style="color:var(--t2)">庫存明細</b> → 匯出 XLS<br>上傳後僅更新 holdings 持股數與均價',
+  pnl:    '元大 → <b style="color:var(--t2)">未實現損益</b> → 匯出 XLS<br>更新 holdings（股數/均價/現價）+ prices TOTAL（精確市值）',
+  trades: '元大 → <b style="color:var(--t2)">投資明細</b> → 匯出 XLS<br>補充 trades 交易記錄，讓走勢圖歷史持股數正確',
 };
 
 function setCsvMode(mode, btn){
   csvMode = mode;
-  document.querySelectorAll('#csv-mode-pnl, #csv-mode-inv').forEach(b => b.classList.remove('on'));
+  document.querySelectorAll('#csv-mode-pnl, #csv-mode-trades').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
-  document.getElementById('csv-mode-hint').innerHTML = CSV_MODE_HINTS[mode];
+  document.getElementById('csv-mode-hint').innerHTML = CSV_MODE_HINTS[mode] || '';
   clearCsvPreview();
 }
 
@@ -1608,11 +1608,12 @@ function handleCsvFile(file){
         showCsvPreview(parsedCsvRows, result.totalMv);
         st.textContent = `解析完成：${parsedCsvRows.length-1} 筆持股，總市值 NT$${Math.round(result.totalMv).toLocaleString()}`;
         st.className = 'status ok';
-      } else {
-        parsedCsvRows = parseYuantaInvCsv(text);
+      } else if(csvMode === 'trades'){
+        const result = parseYuantaTradesCsv(text);
+        parsedCsvRows = result.rows;   // trades 格式
         parsedPriceRow = null;
-        showCsvPreview(parsedCsvRows, null);
-        st.textContent = `解析完成：${parsedCsvRows.length-1} 筆持股`;
+        showTradesPreview(result.rows, result.summary);
+        st.textContent = `解析完成：${result.rows.length} 筆交易記錄`;
         st.className = 'status ok';
       }
     }catch(err){
@@ -1654,6 +1655,89 @@ function parseYuantaPnlCsv(text){
 
   priceRow.totalMv = totalMv;  // 讓 write_day_prices 可以直接用
   return {holdings, priceRow, totalMv};
+}
+
+// ── 解析「投資明細」XLS（交易記錄，用來補 trades 表）──
+// 欄位：成交日期, 代號, 名稱, 交易種類, 買賣, 交易類別, 數量, 單價, ...
+function parseYuantaTradesCsv(text){
+  const rows = [];
+  const summary = {buy:0, sell:0, codes:new Set()};
+
+  // XLS 是 HTML 格式
+  const doc = new DOMParser().parseFromString(text, 'text/html');
+  const trs = [...doc.querySelectorAll('tr')];
+
+  // 找 header 行（含「成交日期」的那行）
+  let headerIdx = -1;
+  let colMap = {};
+  trs.forEach((tr, i) => {
+    const cells = [...tr.querySelectorAll('td,th')].map(c => c.textContent.trim());
+    if(cells.some(c => c.includes('成交日期'))) {
+      headerIdx = i;
+      cells.forEach((c, j) => { colMap[c] = j; });
+    }
+  });
+  if(headerIdx < 0) throw new Error('找不到「成交日期」欄位，請確認是投資明細格式');
+
+  // 欄位 index
+  const iDate = colMap['成交日期'] ?? -1;
+  const iCode = Object.keys(colMap).find(k => k === '代號') !== undefined ? colMap['代號'] : -1;
+  const iName = colMap['名稱'] ?? -1;
+  const iSide = Object.keys(colMap).find(k => k.includes('買') && k.includes('賣')) !== undefined
+    ? colMap[Object.keys(colMap).find(k => k.includes('買') && k.includes('賣'))]
+    : -1;
+  const iQty  = colMap['數量'] ?? -1;
+  const iPrice= colMap['單價'] ?? -1;
+
+  for(let i = headerIdx + 1; i < trs.length; i++){
+    const cells = [...trs[i].querySelectorAll('td')].map(c => c.textContent.trim());
+    if(cells.length < 7) continue;
+    const dateRaw = cells[iDate] || '';
+    if(!dateRaw || dateRaw.includes('成交日期') || dateRaw === '') continue;
+
+    const date  = dateRaw.replace(/\//g, '-').slice(0,10);
+    const code  = (cells[iCode] || '').trim().padStart(4,'0');
+    const name  = (cells[iName] || '').trim();
+    const side  = (cells[iSide] || '').trim();  // 買 or 賣
+    const qty   = parseInt((cells[iQty] || '0').replace(/,/g,''));
+    const price = parseFloat((cells[iPrice] || '0').replace(/,/g,''));
+
+    if(!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
+    if(!/^\d{4}$/.test(code)) continue;
+    if(!['買','賣'].includes(side)) continue;
+    if(isNaN(qty) || qty <= 0) continue;
+
+    rows.push({date, code, name, side, qty, price});
+    if(side === '買') summary.buy++;
+    else summary.sell++;
+    summary.codes.add(code);
+  }
+
+  rows.sort((a,b) => a.date.localeCompare(b.date));
+  return {rows, summary: {...summary, codes: [...summary.codes]}};
+}
+
+// ── 投資明細預覽 ──
+function showTradesPreview(rows, summary){
+  document.getElementById('csv-preview').style.display = 'block';
+  document.getElementById('csv-upload-btn').style.display = 'inline-flex';
+  document.getElementById('csv-upload-btn').textContent = '✓ 寫入 trades 表';
+  const tbl = document.getElementById('csv-preview-table');
+  const preview = rows.slice(0, 8);
+  tbl.innerHTML = `<thead><tr>
+    <th style="text-align:left">日期</th><th>代號</th><th>名稱</th>
+    <th>買賣</th><th style="text-align:right">股數</th><th style="text-align:right">單價</th>
+  </tr></thead><tbody>${preview.map(r => `<tr>
+    <td>${r.date}</td><td>${r.code}</td><td>${r.name}</td>
+    <td style="color:${r.side==='買'?'var(--up)':'var(--dn)'}">${r.side}</td>
+    <td style="text-align:right">${r.qty.toLocaleString()}</td>
+    <td style="text-align:right">${r.price}</td>
+  </tr>`).join('')}
+  <tr style="background:var(--gbg)"><td colspan="6" style="padding:6px 10px;font-size:12px;color:var(--t2)">
+    共 ${rows.length} 筆 · 買入 ${summary.buy} 筆 · 賣出 ${summary.sell} 筆 · ${summary.codes.length} 支標的
+    ${rows.length > 8 ? `（顯示前8筆）` : ''}
+  </td></tr></tbody>`;
+  document.getElementById('csv-preview-title').textContent = `投資明細預覽`;
 }
 
 // ── 解析「庫存明細」XLS（舊格式）──
@@ -1716,6 +1800,48 @@ async function uploadCsvToSheets(){
   st.textContent = '寫入中...'; st.className = 'status'; pb.style.width = '20%';
 
   try{
+    // ── trades 模式：寫入交易記錄 ──
+    if(csvMode === 'trades'){
+      // 先讀現有 trades
+      st.textContent = '讀取現有 trades...'; pb.style.width = '20%';
+      const existRes = await gas({action:'read', sheet:'trades'});
+      const existRows = existRes.ok ? existRes.data : [];
+
+      // 建立去重 key set（date+code+side+qty）
+      const existKeys = new Set();
+      existRows.slice(1).forEach(r => {
+        const d = r[0] instanceof Date ? r[0].toISOString().slice(0,10) : String(r[0]).slice(0,10);
+        existKeys.add(`${d}|${String(r[1]).padStart(4,'0')}|${r[3]}|${r[4]}`);
+      });
+
+      // 新增不重複的記錄
+      const header = existRows[0] || ['date','code','name','side','qty','price','note'];
+      const newRows = parsedCsvRows.filter(r =>
+        !existKeys.has(`${r.date}|${r.code}|${r.side}|${r.qty}`)
+      ).map(r => [r.date, r.code, r.name, r.side, r.qty, r.price, '']);
+
+      if(newRows.length === 0){
+        st.textContent = '沒有新記錄（全部已存在）'; st.className = 'status ok';
+        pb.style.width = '100%'; clearCsvPreview(); return;
+      }
+
+      // 合併並排序
+      const allData = [...existRows.slice(1), ...newRows]
+        .filter(r => r[0])
+        .sort((a,b) => String(a[0]).localeCompare(String(b[0])));
+      const writeRows = [header, ...allData];
+
+      st.textContent = `寫入 ${newRows.length} 筆新交易...`; pb.style.width = '60%';
+      const res = await gas({action:'write', sheet:'trades', rows:writeRows});
+      if(!res.ok) throw new Error(res.error);
+      pb.style.width = '100%';
+      st.textContent = `✓ 新增 ${newRows.length} 筆交易記錄（請到 GAS 執行 backfillPrices 補歷史價格）`;
+      st.className = 'status ok';
+      clearCsvPreview();
+      document.getElementById('csv-upload-btn').textContent = '✓ 確認寫入 Sheets';
+      return;
+    }
+
     // 1. 更新 holdings
     const res = await gas({action:'write', sheet:'holdings', rows:parsedCsvRows});
     if(!res.ok) throw new Error(res.error);
