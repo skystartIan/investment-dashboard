@@ -1658,7 +1658,8 @@ function parseYuantaPnlCsv(text){
 }
 
 // ── 解析「投資明細」XLS（交易記錄，用來補 trades 表）──
-// 欄位：成交日期, 代號, 名稱, 交易種類, 買賣, 交易類別, 數量, 單價, ...
+// 元大 XLS 實際是 HTML，header 有兩列（合併儲存格），資料行扁平欄位：
+// 0=成交日期, 1=代號, 2=名稱, 3=交易種類, 4=買賣, 5=交易類別, 6=數量, 7=單價, ...
 function parseYuantaTradesCsv(text){
   const rows = [];
   const summary = {buy:0, sell:0, codes:new Set()};
@@ -1667,40 +1668,30 @@ function parseYuantaTradesCsv(text){
   const doc = new DOMParser().parseFromString(text, 'text/html');
   const trs = [...doc.querySelectorAll('tr')];
 
-  // 找 header 行（含「成交日期」的那行）
-  let headerIdx = -1;
-  let colMap = {};
-  trs.forEach((tr, i) => {
-    const cells = [...tr.querySelectorAll('td,th')].map(c => c.textContent.trim());
-    if(cells.some(c => c.includes('成交日期'))) {
-      headerIdx = i;
-      cells.forEach((c, j) => { colMap[c] = j; });
-    }
-  });
-  if(headerIdx < 0) throw new Error('找不到「成交日期」欄位，請確認是投資明細格式');
+  // 確認有「成交日期」欄位存在（格式驗證）
+  const hasHeader = trs.some(tr =>
+    [...tr.querySelectorAll('td,th')].some(c => c.textContent.trim().includes('成交日期'))
+  );
+  if(!hasHeader) throw new Error('找不到「成交日期」欄位，請確認是投資明細格式');
 
-  // 欄位 index
-  const iDate = colMap['成交日期'] ?? -1;
-  const iCode = Object.keys(colMap).find(k => k === '代號') !== undefined ? colMap['代號'] : -1;
-  const iName = colMap['名稱'] ?? -1;
-  const iSide = Object.keys(colMap).find(k => k.includes('買') && k.includes('賣')) !== undefined
-    ? colMap[Object.keys(colMap).find(k => k.includes('買') && k.includes('賣'))]
-    : -1;
-  const iQty  = colMap['數量'] ?? -1;
-  const iPrice= colMap['單價'] ?? -1;
-
-  for(let i = headerIdx + 1; i < trs.length; i++){
+  // 逐列掃描資料行：第一欄符合日期格式（YYYY/MM/DD 或 YYYY-MM-DD）就當資料
+  for(let i = 0; i < trs.length; i++){
     const cells = [...trs[i].querySelectorAll('td')].map(c => c.textContent.trim());
-    if(cells.length < 7) continue;
-    const dateRaw = cells[iDate] || '';
-    if(!dateRaw || dateRaw.includes('成交日期') || dateRaw === '') continue;
+    if(cells.length < 8) continue;
 
-    const date  = dateRaw.replace(/\//g, '-').slice(0,10);
-    const code  = (cells[iCode] || '').trim().padStart(4,'0');
-    const name  = (cells[iName] || '').trim();
-    const side  = (cells[iSide] || '').trim();  // 買 or 賣
-    const qty   = parseInt((cells[iQty] || '0').replace(/,/g,''));
-    const price = parseFloat((cells[iPrice] || '0').replace(/,/g,''));
+    // 用正規表示式判斷第一欄是否為日期
+    const dateRaw = cells[0] || '';
+    if(!dateRaw.match(/^\d{4}[\/\-]\d{2}[\/\-]\d{2}/)) continue;
+
+    // 西元年：元大格式為 2026/04/10（已是西元，不需轉換）
+    const date  = dateRaw.replace(/\//g, '-').slice(0, 10);
+    const code  = (cells[1] || '').trim().padStart(4, '0');
+    const name  = (cells[2] || '').trim();
+    // cells[3] = 交易種類（定期定額/一般），cells[4] = 買賣
+    const side  = (cells[4] || '').trim();
+    // cells[5] = 交易類別（現股），cells[6] = 數量，cells[7] = 單價
+    const qty   = parseInt((cells[6] || '0').replace(/,/g, ''));
+    const price = parseFloat((cells[7] || '0').replace(/,/g, ''));
 
     if(!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
     if(!/^\d{4}$/.test(code)) continue;
