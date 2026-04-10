@@ -1117,32 +1117,40 @@ function drawLine(rows){
       plugins:{
         legend:{display:false},
         tooltip:{
-          enabled:false,  // 關掉原生 tooltip，改用上方 hover box
+          enabled:false,
           external(context){
             const hb = document.getElementById('chart-hover-box');
-            const {tooltip} = context;
-            if(tooltip.opacity === 0 || !tooltip.dataPoints?.length){
+            const {chart, tooltip} = context;
+            // 用 _active 判斷是否有 hover
+            if(!chart._active || !chart._active.length){
               hb.style.display = 'none';
               return;
             }
+            const idx = chart._active[0].index;
+            const row = chartRows[idx];
+            if(!row){ hb.style.display='none'; return; }
             hb.style.display = 'block';
-            const dp = tooltip.dataPoints[0];
-            const idx = dp.dataIndex;
-            document.getElementById('chb-date').textContent = fmtXLabel(dp.label);
-            const myDp = tooltip.dataPoints.find(p => p.dataset.label === '我的台股');
-            if(myDp && myDp.raw != null){
-              const v = myDp.raw;
-              document.getElementById('chb-my').textContent = '我的台股 ' + (v>=0?'+':'') + v.toFixed(2)+'%';
-              const actualVal = chartRows[idx]?.tw;
-              document.getElementById('chb-mv').textContent = actualVal ? 'NT$'+Math.round(actualVal).toLocaleString() : '';
-            }
-            const twiiDp = tooltip.dataPoints.find(p => p.dataset.label === '加權指數');
-            if(twiiDp && twiiDp.raw != null){
-              const tv = twiiDp.raw;
-              document.getElementById('chb-twii').textContent = '大盤 '+(tv>=0?'+':'')+tv.toFixed(2)+'%';
-            } else {
-              document.getElementById('chb-twii').textContent = '';
-            }
+            // 日期
+            document.getElementById('chb-date').textContent = fmtXLabel(row.d);
+            // 我的台股 %
+            const base = chartRows[0]?.tw || 1;
+            const pct = (row.tw - base) / base * 100;
+            document.getElementById('chb-my').textContent =
+              '我的台股 ' + (pct>=0?'+':'') + pct.toFixed(2) + '%';
+            // 市值
+            document.getElementById('chb-mv').textContent =
+              'NT$' + Math.round(row.tw).toLocaleString();
+            // 大盤
+            if(showTWII && twiiDaily.length){
+              const tm={}; twiiDaily.forEach(([d,v])=>{tm[d]=v;});
+              const twiiBase = twiiDaily.find(([d])=>d>=chartRows[0]?.d)?.[1];
+              const twiiNow = tm[row.d] || null;
+              if(twiiBase && twiiNow){
+                const tp = (twiiNow-twiiBase)/twiiBase*100;
+                document.getElementById('chb-twii').textContent =
+                  '大盤 '+(tp>=0?'+':'')+tp.toFixed(2)+'%';
+              } else { document.getElementById('chb-twii').textContent=''; }
+            } else { document.getElementById('chb-twii').textContent=''; }
           }
         }
       },
@@ -1644,6 +1652,7 @@ function parseYuantaPnlCsv(text){
     totalMv += mv;
   });
 
+  priceRow.totalMv = totalMv;  // 讓 write_day_prices 可以直接用
   return {holdings, priceRow, totalMv};
 }
 
@@ -1718,7 +1727,8 @@ async function uploadCsvToSheets(){
       const pricePayload = {
         action: 'write_day_prices',
         date: today,
-        prices: parsedPriceRow.prices
+        prices: parsedPriceRow.prices,
+        totalMv: parsedPriceRow.totalMv || 0
       };
       const res2 = await gas(pricePayload);
       pb.style.width = '90%';
