@@ -343,7 +343,7 @@ table.div-tbl tr:hover td{background:var(--surf2)}
     <div class="chart-legend-row" id="chart-legend">
       <div class="chart-leg">
         <div class="chart-leg-line" style="background:#00c896"></div>
-        <span>我的台股</span>
+        <span>台股</span>
         <span class="chart-leg-pct up" id="leg-my-pct"></span>
       </div>
     </div>
@@ -680,19 +680,23 @@ async function gas(payload){
   return JSON.parse(await r.text());
 }
 
-// TWSE 昨日收盤（for 今日漲幅）
+// 昨日收盤：從 prices 表取倒數第二筆，不依賴 TWSE API
 async function fetchTWSEYesterdayClose(){
-  let d=new Date(); d.setDate(d.getDate()-1);
-  for(let i=0;i<5;i++){if(d.getDay()!==0&&d.getDay()!==6) break; d.setDate(d.getDate()-1);}
-  const ymd=d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
   const map={};
   try{
-    const r=await fetch(`https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&date=${ymd}&type=ALLBUT0999`);
-    const j=await r.json();
-    (j.data9||[]).forEach(row=>{
-      const code=String(row[0]).trim();
-      const close=parseFloat(String(row[8]||'').replace(/,/g,''));
-      if(!isNaN(close)) map[code]=close;
+    const pricesRes = await gas({action:'read', sheet:'prices'});
+    if(!pricesRes.ok || !pricesRes.data?.length) return map;
+    const header = pricesRes.data[0].map(h => {
+      const s = String(h).trim();
+      return /^\d{1,3}$/.test(s) ? s.padStart(4,'0') : s;
+    });
+    const rows = pricesRes.data.slice(1).filter(r => r[0]);
+    if(rows.length < 2) return map;
+    const prevRow = rows[rows.length - 2]; // 倒數第二行 = 昨日收盤
+    header.forEach((code, i) => {
+      if(!/^\d{4}$/.test(code)) return;
+      const v = parseFloat(String(prevRow[i]||'').replace(/,/g,''));
+      if(!isNaN(v) && v > 0) map[code] = v;
     });
   }catch(_){}
   return map;
@@ -1067,7 +1071,7 @@ function drawLine(rows){
   const myFinal=myPctData[myPctData.length-1].y;
 
   const datasets=[{
-    label:'我的台股',
+    label:'台股',
     data:myPctData,
     borderColor:'#00c896',
     backgroundColor:'rgba(0,200,150,0.05)',
@@ -1132,11 +1136,11 @@ function drawLine(rows){
             hb.style.display = 'block';
             // 日期
             document.getElementById('chb-date').textContent = fmtXLabel(row.d);
-            // 我的台股 %
+            // 台股 %
             const base = chartRows[0]?.tw || 1;
             const pct = (row.tw - base) / base * 100;
             document.getElementById('chb-my').textContent =
-              '我的台股 ' + (pct>=0?'+':'') + pct.toFixed(2) + '%';
+              '台股 ' + (pct>=0?'+':'') + pct.toFixed(2) + '%';
             // 市值
             document.getElementById('chb-mv').textContent =
               'NT$' + Math.round(row.tw).toLocaleString();
@@ -1202,7 +1206,7 @@ function drawLine(rows){
 
   // 更新圖例
   const legEl=document.getElementById('chart-legend');
-  let legHtml=`<div class="chart-leg"><div class="chart-leg-line" style="background:#00c896"></div><span>我的台股</span><span class="chart-leg-pct ${myFinal>=0?'up':'dn'}" id="leg-my-pct">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
+  let legHtml=`<div class="chart-leg"><div class="chart-leg-line" style="background:#00c896"></div><span>台股</span><span class="chart-leg-pct ${myFinal>=0?'up':'dn'}" id="leg-my-pct">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
   if(showTWII&&twiiBase!=null){
     // 計算 TWII 期間漲幅
     const tm={};twiiDaily.forEach(([d,v])=>{tm[d]=v;});
