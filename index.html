@@ -347,21 +347,16 @@ table.div-tbl tr:hover td{background:var(--surf2)}
         <span class="chart-leg-pct up" id="leg-my-pct"></span>
       </div>
     </div>
-    <!-- 圖表區：相對定位，讓懸浮框可以 absolute 貼在右上角 -->
-    <div style="position:relative">
-      <!-- 懸浮 hover 資訊框（右上角，滑鼠移入圖表才顯示） -->
-      <div id="chart-hover-box" style="display:none;position:absolute;top:8px;right:52px;z-index:10;background:var(--surf);border:1px solid var(--b2);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:220px">
-        <div id="chb-date" style="color:var(--t3);font-size:10px;font-family:var(--mono);margin-bottom:4px;letter-spacing:.03em"></div>
-        <div style="display:flex;flex-direction:column;gap:3px">
-          <div style="display:flex;justify-content:space-between;gap:16px">
-            <span style="color:#00c896;font-family:var(--mono);font-weight:600" id="chb-my"></span>
-            <span style="color:var(--t2);font-family:var(--mono)" id="chb-mv"></span>
-          </div>
-          <div id="chb-twii" style="color:#4d9fff;font-family:var(--mono);font-size:11px"></div>
-        </div>
+    <!-- hover 資訊列（圖表上方，不擋圖） -->
+    <div id="chart-hover-box" style="display:none;background:var(--surf2);border:1px solid var(--b2);border-radius:8px;padding:7px 12px;font-size:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div id="chb-date" style="color:var(--t3);font-size:11px;font-family:var(--mono);letter-spacing:.03em"></div>
+      <div style="display:flex;gap:16px;align-items:center">
+        <span style="color:#00c896;font-family:var(--mono);font-weight:600" id="chb-my"></span>
+        <span style="color:var(--t2);font-family:var(--mono)" id="chb-mv"></span>
+        <span id="chb-twii" style="color:#4d9fff;font-family:var(--mono);font-size:11px"></span>
       </div>
-      <div class="chart-wrap" style="height:300px"><canvas id="lineC"></canvas></div>
     </div>
+    <div class="chart-wrap" style="height:300px"><canvas id="lineC"></canvas></div>
   </div>
   <div id="snap-list"></div>
 </div>
@@ -1133,7 +1128,7 @@ function drawLine(rows){
             const idx = chart._active[0].index;
             const row = chartRows[idx];
             if(!row){ hb.style.display='none'; return; }
-            hb.style.display = 'block';
+            hb.style.display = 'flex';
             // 日期
             document.getElementById('chb-date').textContent = fmtXLabel(row.d);
             // 台股 %
