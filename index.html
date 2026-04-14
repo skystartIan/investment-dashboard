@@ -732,53 +732,41 @@ async function refresh(){
 // 不需要等 GAS，速度更快
 async function manualDailyUpdate(){
   const st=document.getElementById('st1'),pb=document.getElementById('prog1');
-  st.textContent='抓取最新收盤中...';st.className='status';pb.style.width='20%';
+  st.textContent='更新中...';st.className='status';pb.style.width='10%';
   try{
-    // 1. 先讀 holdings 取得最新股數
-    const holdRes = await gas({action:'read', sheet:'holdings'});
-    if(!holdRes.ok) throw new Error(holdRes.error||'讀取失敗');
-    pb.style.width='40%';
-
-    // 2. 用 read_prices（GAS 已處理好的走勢資料）取最新市值
-    //    改用 holdings 現有現價（最快），背景再用 prices 更新
-    stockData = holdRes.data.slice(1).filter(r=>r[0]).map(r=>({
-      code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]
-    }));
+    // 呼叫 GAS daily_update：抓今日收盤 → 寫 prices → 更新 holdings 現價 → 算 TOTAL
+    // GAS 會真正去 TWSE/TPEX 抓最新收盤，不依賴 prices 表已有的資料
+    pb.style.width='30%';
+    const res = await gas({action:'daily_update'});
     pb.style.width='70%';
-    renderOverview();
 
-    // 3. 再讀 prices 表最後幾列，用最新收盤更新現價
-    const pricesRes = await gas({action:'read_prices'});
+    if(!res.ok) throw new Error(res.error||'更新失敗');
+
+    // 重新讀 holdings（GAS 已更新 current_price）
+    const holdRes = await gas({action:'read', sheet:'holdings'});
     pb.style.width='90%';
-    if(pricesRes.ok && pricesRes.portfolio?.length){
-      // portfolio = [[date, twd], ...]，取最新日期的市值
-      const latest = pricesRes.portfolio[pricesRes.portfolio.length - 1];
-      const latestDate = latest[0];
-      // 從 prices 表直接讀最後一列收盤（用原始 read）
-      const rawRes = await gas({action:'read', sheet:'prices'});
-      if(rawRes.ok && rawRes.data?.length > 1){
-        const hdr = rawRes.data[0].map(h => /^\d{1,3}$/.test(String(h).trim()) ? String(h).trim().padStart(4,'0') : String(h).trim());
-        const lastRow = rawRes.data[rawRes.data.length-1];
-        stockData = stockData.map(s => {
-          const ci = hdr.indexOf(s.code.padStart(4,'0'));
-          if(ci < 0) return s;
-          // 找最後一個有值的收盤
-          for(let ri = rawRes.data.length-1; ri >= 1; ri--){
-            const v = parseFloat(String(rawRes.data[ri][ci]||'').replace(/,/g,''));
-            if(!isNaN(v) && v > 0){ return {...s, price:v}; }
-          }
-          return s;
-        });
-      }
+    if(holdRes.ok){
+      stockData = holdRes.data.slice(1).filter(r=>r[0]).map(r=>({
+        code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]
+      }));
       renderOverview();
-      st.textContent=`✓ 已更新（prices 最新：${latestDate}）`;
-      st.className='status ok';
-    } else {
-      st.textContent='更新：'+new Date().toLocaleTimeString('zh-TW');
-      st.className='status ok';
     }
+
     pb.style.width='100%';
-  }catch(e){st.textContent=e.message;st.className='status err';pb.style.width='0%';}
+    const dateStr = res.date ? res.date.slice(0,4)+'-'+res.date.slice(4,6)+'-'+res.date.slice(6,8) : '';
+    const totalStr = res.total ? ' · NT$'+Math.round(res.total).toLocaleString() : '';
+    st.textContent=`✓ 已更新${dateStr?' ('+dateStr+')':''}${totalStr}`;
+    st.className='status ok';
+
+  }catch(e){
+    st.textContent='更新失敗：'+e.message;
+    st.className='status err';
+    pb.style.width='0%';
+    // fallback：至少讀 holdings
+    gas({action:'read',sheet:'holdings'}).then(r=>{
+      if(r.ok){ stockData=r.data.slice(1).filter(x=>x[0]).map(x=>({code:String(x[0]),mkt:x[1],sh:+x[2],avg:+x[3],price:+x[4],name:x[5]||x[0]})); renderOverview(); }
+    }).catch(_=>{});
+  }
 
   // 昨收非同步背景抓
   fetchTWSEYesterdayClose().then(map=>{
@@ -1781,8 +1769,12 @@ function parseYuantaPnlCsv(text){
     const qty   = parseInt(cells[4].replace(/,/g,''));
     const price = parseFloat(cells[5].replace(/,/g,''));
     const mv    = parseFloat(cells[6].replace(/,/g,''));
-    const avg   = parseFloat(cells[8].replace(/,/g,''));
-    if(isNaN(qty)||isNaN(price)||isNaN(avg)) return;
+    const cost  = parseFloat(cells[7].replace(/,/g,''));  // 成本金額
+    const fee   = parseFloat(cells[8].replace(/,/g,'')||0);  // 手續費
+    const tax   = parseFloat(cells[9].replace(/,/g,'')||0);  // 交易稅
+    // 含費均價 = (成本金額 + 手續費 + 交易稅) / 庫存數量，與元大損益一致
+    const avg   = qty > 0 ? (cost + fee + tax) / qty : 0;
+    if(isNaN(qty)||isNaN(price)||isNaN(avg)||qty<=0) return;
     holdings.push([code,'TW',qty,avg,price,name]);
     priceRow.prices[code] = price;
     totalMv += mv;
