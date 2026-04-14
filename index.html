@@ -231,7 +231,7 @@ table.div-tbl tr:hover td{background:var(--surf2)}
   <div class="header-right">
     <span class="theme-label" id="tlabel">暗色</span>
     <div class="theme-toggle" onclick="toggleTheme()"></div>
-    <button class="hbtn" onclick="refresh()">↻ 更新</button>
+    <button class="hbtn" onclick="manualDailyUpdate()" title="抓取今日最新收盤價並更新總覽">↻ 更新</button>
   </div>
 </div>
 
@@ -716,9 +716,27 @@ async function refresh(){
   fetchTWSEYesterdayClose().then(map=>{
     if(Object.keys(map).length){
       prevPrices=map;
-      renderPnlTable(); // 有昨收了再更新今日漲幅欄
+      renderPnlTable();
     }
   }).catch(_=>{});
+}
+
+// 手動觸發當日價格更新（呼叫 GAS dailyUpdatePrices 邏輯）
+async function manualDailyUpdate(){
+  const st=document.getElementById('st1'),pb=document.getElementById('prog1');
+  st.textContent='抓取今日收盤中...';st.className='status';pb.style.width='10%';
+  try{
+    const res=await gas({action:'daily_update'});
+    pb.style.width='100%';
+    if(res.ok){
+      st.textContent='✓ 今日收盤已更新，重新載入資料...';
+      st.className='status ok';
+      await refresh();
+    } else {
+      st.textContent='更新失敗：'+(res.error||'');
+      st.className='status err';
+    }
+  }catch(e){st.textContent=e.message;st.className='status err';pb.style.width='0%';}
 }
 
 function pct(s){return(s.price-s.avg)/s.avg*100;}
