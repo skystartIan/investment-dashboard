@@ -598,7 +598,7 @@ const histMonthly=[
   ['2025-05-28',2343811],['2025-06-28',2491070],['2025-07-28',1519690],
   ['2025-08-28',1594496],['2025-09-28',1719704],['2025-10-28',1808932],
   ['2025-11-28',1604040],['2025-12-28',1825092],['2026-01-28',2535658],
-  ['2026-02-28',2608956],['2026-03-28',2770043],['2026-04-09',3007849],
+  ['2026-02-28',2608956],['2026-03-28',2770043],['2026-04-10',3094038],
 ];
 
 // 股利明細
@@ -687,7 +687,14 @@ async function fetchTWSEYesterdayClose(){
     });
     const rows = pricesRes.data.slice(1).filter(r => r[0]);
     if(rows.length < 2) return map;
-    const prevRow = rows[rows.length - 2]; // 倒數第二行 = 昨日收盤
+    // 找倒數第二個有效日期（去重，避免同一天有多列）
+    const lastDate = String(rows[rows.length-1][0]).slice(0,10);
+    let prevRow = null;
+    for(let i = rows.length-2; i >= 0; i--){
+      const d = String(rows[i][0]).slice(0,10);
+      if(d !== lastDate){ prevRow = rows[i]; break; }
+    }
+    if(!prevRow) return map;
     header.forEach((code, i) => {
       if(!/^\d{4}$/.test(code)) return;
       const v = parseFloat(String(prevRow[i]||'').replace(/,/g,''));
@@ -732,52 +739,45 @@ async function manualDailyUpdate(){
     if(!holdRes.ok) throw new Error(holdRes.error||'讀取失敗');
     pb.style.width='40%';
 
-    // 2. 從 prices 表讀最新一列的收盤（最快的方式）
-    const pricesRes = await gas({action:'read', sheet:'prices'});
+    // 2. 用 read_prices（GAS 已處理好的走勢資料）取最新市值
+    //    改用 holdings 現有現價（最快），背景再用 prices 更新
+    stockData = holdRes.data.slice(1).filter(r=>r[0]).map(r=>({
+      code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]
+    }));
     pb.style.width='70%';
+    renderOverview();
 
-    if(pricesRes.ok && pricesRes.data?.length > 1){
-      // 取最後一列（最新日期）
-      const header = pricesRes.data[0].map(h => {
-        const s = String(h).trim();
-        return /^\d{1,3}$/.test(s) ? s.padStart(4,'0') : s;
-      });
-      const lastRow = pricesRes.data[pricesRes.data.length - 1];
-      const latestDate = String(lastRow[0]).slice(0,10);
-
-      // 用最新收盤更新 stockData
-      stockData = holdRes.data.slice(1).filter(r=>r[0]).map(r=>{
-        const code = String(r[0]).padStart(4,'0');
-        const ci = header.indexOf(code);
-        // forward-fill：找最近有值的收盤
-        let latestPrice = +r[4]; // 預設用 holdings 現有現價
-        if(ci >= 0){
-          for(let ri = pricesRes.data.length-1; ri >= 1; ri--){
-            const v = parseFloat(String(pricesRes.data[ri][ci]||'').replace(/,/g,''));
-            if(!isNaN(v) && v > 0){ latestPrice = v; break; }
+    // 3. 再讀 prices 表最後幾列，用最新收盤更新現價
+    const pricesRes = await gas({action:'read_prices'});
+    pb.style.width='90%';
+    if(pricesRes.ok && pricesRes.portfolio?.length){
+      // portfolio = [[date, twd], ...]，取最新日期的市值
+      const latest = pricesRes.portfolio[pricesRes.portfolio.length - 1];
+      const latestDate = latest[0];
+      // 從 prices 表直接讀最後一列收盤（用原始 read）
+      const rawRes = await gas({action:'read', sheet:'prices'});
+      if(rawRes.ok && rawRes.data?.length > 1){
+        const hdr = rawRes.data[0].map(h => /^\d{1,3}$/.test(String(h).trim()) ? String(h).trim().padStart(4,'0') : String(h).trim());
+        const lastRow = rawRes.data[rawRes.data.length-1];
+        stockData = stockData.map(s => {
+          const ci = hdr.indexOf(s.code.padStart(4,'0'));
+          if(ci < 0) return s;
+          // 找最後一個有值的收盤
+          for(let ri = rawRes.data.length-1; ri >= 1; ri--){
+            const v = parseFloat(String(rawRes.data[ri][ci]||'').replace(/,/g,''));
+            if(!isNaN(v) && v > 0){ return {...s, price:v}; }
           }
-        }
-        return {code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:latestPrice,name:r[5]||r[0]};
-      });
-
-      pb.style.width='100%';
+          return s;
+        });
+      }
       renderOverview();
       st.textContent=`✓ 已更新（prices 最新：${latestDate}）`;
       st.className='status ok';
-
-      // 3. 背景把最新現價回寫 GAS holdings（讓下次 refresh 也正確）
-      gas({action:'daily_update'}).catch(_=>{});
-
     } else {
-      // fallback：只讀 holdings
-      stockData = holdRes.data.slice(1).filter(r=>r[0]).map(r=>({
-        code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]
-      }));
-      pb.style.width='100%';
-      renderOverview();
       st.textContent='更新：'+new Date().toLocaleTimeString('zh-TW');
       st.className='status ok';
     }
+    pb.style.width='100%';
   }catch(e){st.textContent=e.message;st.className='status err';pb.style.width='0%';}
 
   // 昨收非同步背景抓
@@ -1284,15 +1284,81 @@ function drawLine(rows){
 // ══════════════════════════════
 // 股利
 // ══════════════════════════════
-function renderDividends(){
-  gas({action:'read',sheet:'dividends'}).then(res=>{
-    if(res.ok&&res.data.length>1){
-      const extra=res.data.slice(1).filter(r=>r[0]).map(r=>({code:String(r[0]),name:String(r[1]),date:String(r[2]),shares:+r[3],cps:+r[4]}));
-      if(extra.length){divRecordsCache=[...DIVIDEND_RECORDS,...extra];renderDividendUI(divRecordsCache);}
-    }
-  }).catch(_=>{});
+async function renderDividends(){
+  // 先用硬編碼資料立即渲染（不等 API）
   renderDividendUI(divRecordsCache);
+
+  // 從 GAS 撈 TWSE/TPEX 配息資料（用目前持股代號過濾）
+  const codes = stockData.map(s => s.code);
+  if (!codes.length) return;
+
+  try {
+    const res = await gas({action:'fetch_dividends', codes});
+    if (!res.ok) throw new Error(res.error);
+
+    const today = new Date().toISOString().slice(0,10);
+    // 建立持股 shares map
+    const shMap = {};
+    stockData.forEach(s => { shMap[s.code] = s.sh; });
+
+    // 合併：API 歷史 + Sheets 手動補充 + 硬編碼
+    // API 資料的 shares 用目前持股數（API 只知道 cps，不知道你當時持有幾股）
+    // 歷史配息的 shares 要用 DIVIDEND_RECORDS 裡的（因為當時股數可能不同）
+    const apiKeys = new Set();
+    const apiHistory = (res.history||[]).map(r => {
+      const key = `${r.code}|${r.date}`;
+      apiKeys.add(key);
+      // 用 DIVIDEND_RECORDS 裡同代號同日期的 shares，否則用目前股數
+      const existing = DIVIDEND_RECORDS.find(d => d.code===r.code && d.date===r.date);
+      return {...r, shares: existing ? existing.shares : (shMap[r.code]||0)};
+    }).filter(r => r.shares > 0);
+
+    // 硬編碼裡 API 沒有的（較舊的記錄）
+    const legacyRecords = DIVIDEND_RECORDS.filter(d => !apiKeys.has(`${d.code}|${d.date}`));
+
+    // Sheet 手動補充
+    const sheetRecords = (res.sheet||[]).map(r => ({...r, shares: shMap[r.code]||r.shares||0})).filter(r=>r.shares>0);
+
+    divRecordsCache = [...apiHistory, ...legacyRecords, ...sheetRecords];
+
+    // 更新預計配息（用 API upcoming 取代硬編碼 NEXT_DIV）
+    if (res.upcoming && res.upcoming.length) {
+      divUpcoming = res.upcoming.filter(r => shMap[r.code] > 0).map(r => ({
+        ...r,
+        shares: shMap[r.code],
+        freq: _guessFreq(r.code, res.history||[])
+      }));
+    }
+
+    renderDividendUI(divRecordsCache);
+  } catch(e) {
+    console.log('fetch_dividends failed:', e);
+    // fallback：從 Sheets dividends 表讀
+    gas({action:'read',sheet:'dividends'}).then(res=>{
+      if(res.ok&&res.data.length>1){
+        const extra=res.data.slice(1).filter(r=>r[0]).map(r=>({code:String(r[0]),name:String(r[1]),date:String(r[2]).slice(0,10),shares:+r[3],cps:+r[4]}));
+        if(extra.length){divRecordsCache=[...DIVIDEND_RECORDS,...extra];renderDividendUI(divRecordsCache);}
+      }
+    }).catch(_=>{});
+  }
 }
+
+// 根據歷史配息頻率推測下次配息頻率
+function _guessFreq(code, history){
+  const yrMap={};
+  history.filter(r=>r.code===code).forEach(r=>{
+    const yr=r.date.slice(0,4);
+    yrMap[yr]=(yrMap[yr]||0)+1;
+  });
+  const counts=Object.values(yrMap);
+  if(!counts.length) return 'A';
+  const avg=counts.reduce((s,v)=>s+v,0)/counts.length;
+  if(avg>=3.5) return 'Q';
+  if(avg>=1.5) return 'H';
+  return 'A';
+}
+
+let divUpcoming = [...NEXT_DIV.map(d=>({...d, shares:0}))]; // 初始化
 
 function renderDividendUI(records){
   const allIncome=records.reduce((s,r)=>s+r.shares*r.cps,0);
@@ -1348,9 +1414,12 @@ function renderDividendUI(records){
   const heldMap={};
   stockData.forEach(s=>{heldMap[s.code]=s.sh;});
   let yearTotal=0;
-  document.getElementById('div-next-grid').innerHTML=NEXT_DIV.map(d=>{
-    const held=heldMap[d.code]||0;
+  // divUpcoming：優先用 API 撈到的即將配息，fallback 用 NEXT_DIV
+  const nextList = divUpcoming.length ? divUpcoming : NEXT_DIV.map(d=>({...d,shares:heldMap[d.code]||0}));
+  document.getElementById('div-next-grid').innerHTML=nextList.filter(d=>d.shares>0||!divUpcoming.length).map(d=>{
+    const held=d.shares||heldMap[d.code]||0;
     const times=FREQ_TIMES[d.freq]||1;
+    const exDate=d.date?`<div style="font-size:10px;color:var(--t3);margin-top:2px">除息日 ${d.date}</div>`:'';
     if(held){
       const perTime=Math.round(held*d.cps);
       const annual=perTime*times;
@@ -1358,20 +1427,22 @@ function renderDividendUI(records){
       return`<div class="div-next-card">
         <div class="div-next-top">
           <div class="div-next-code">${d.code}</div>
-          <div class="div-next-freq">${FREQ_LABEL[d.freq]}</div>
+          <div class="div-next-freq">${FREQ_LABEL[d.freq]||'配息'}</div>
         </div>
         <div class="div-next-name">${d.name}</div>
         <div class="div-next-val">+NT$${perTime.toLocaleString()}</div>
         <div class="div-next-sub">${held.toLocaleString()}股 × ${d.cps}元</div>
+        ${exDate}
         ${times>1?`<div class="div-next-annual">年化 ≈ NT$${annual.toLocaleString()}（×${times}）</div>`:''}
       </div>`;
     }
     return`<div class="div-next-card">
-      <div class="div-next-top"><div class="div-next-code">${d.code}</div><div class="div-next-freq">${FREQ_LABEL[d.freq]}</div></div>
+      <div class="div-next-top"><div class="div-next-code">${d.code}</div><div class="div-next-freq">${FREQ_LABEL[d.freq]||'配息'}</div></div>
       <div class="div-next-name">${d.name}</div>
+      ${exDate}
       <div class="div-next-na">未持有</div>
     </div>`;
-  }).join('');
+  }).join('') || '<div style="color:var(--t3);font-size:13px;padding:12px">暫無即將除息資料</div>';
 
   document.getElementById('div-year-est-val').textContent='NT$'+yearTotal.toLocaleString();
   document.getElementById('div-year-est-sub').textContent=`依現有持股估算，${new Date().getFullYear()}年預估年收`;
@@ -1891,8 +1962,20 @@ async function uploadCsvToSheets(){
       st.textContent = `寫入 ${newRows.length} 筆新交易...`; pb.style.width = '60%';
       const res = await gas({action:'write', sheet:'trades', rows:writeRows});
       if(!res.ok) throw new Error(res.error);
+      pb.style.width = '90%';
+      st.textContent = `✓ 新增 ${newRows.length} 筆，排程背景更新...`;
+
+      // 自動觸發背景處理（補收盤價、更新 TOTAL）
+      try {
+        const trigRes = await gas({action:'process_trades'});
+        st.textContent = trigRes.ok
+          ? `✓ 新增 ${newRows.length} 筆，${trigRes.message}`
+          : `✓ 新增 ${newRows.length} 筆（背景更新排程失敗，請手動執行 repairMissingCodes）`;
+      } catch(_) {
+        st.textContent = `✓ 新增 ${newRows.length} 筆（請手動執行 repairMissingCodes）`;
+      }
+
       pb.style.width = '100%';
-      st.textContent = `✓ 新增 ${newRows.length} 筆交易記錄（請到 GAS 執行 backfillPrices 補歷史價格）`;
       st.className = 'status ok';
       clearCsvPreview();
       document.getElementById('csv-upload-btn').textContent = '✓ 確認寫入 Sheets';
