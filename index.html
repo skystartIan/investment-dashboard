@@ -1374,21 +1374,73 @@ async function submitTrade(){
 // ── CSV 上傳 ──
 let parsedCsvRows=null, parsedPriceRow=null, csvMode='pnl';
 const CSV_MODE_HINTS={
-  pnl:'元大 → <b style="color:var(--t2)">未實現損益</b> → 匯出 XLS<br>更新 holdings（股數/均價/現價）+ prices TOTAL',
+  pnl:'元大 → <b style="color:var(--t2)">未實現損益</b> → 匯出 XLS<br>自動比對持倉差異 → 寫入 trades + 更新 holdings + 今日 prices',
   trades:'元大 → <b style="color:var(--t2)">投資明細</b> → 匯出 XLS<br>補充 trades 交易記錄',
 };
 function setCsvMode(mode,btn){csvMode=mode;document.querySelectorAll('#csv-mode-pnl,#csv-mode-trades').forEach(b=>b.classList.remove('on'));btn.classList.add('on');document.getElementById('csv-mode-hint').innerHTML=CSV_MODE_HINTS[mode]||'';clearCsvPreview();}
 function handleCsvDrop(e){e.preventDefault();document.getElementById('csv-drop-zone').style.borderColor='var(--b2)';document.getElementById('csv-drop-zone').style.background='';const file=e.dataTransfer.files[0];if(file) handleCsvFile(file);}
+let parsedDiffRows=[];
 function handleCsvFile(file){
   if(!file) return;
   const st=document.getElementById('st-csv');
   st.textContent='解析中...';st.className='status';
   const reader=new FileReader();
-  reader.onload=e=>{
+  reader.onload=async e=>{
     try{
       const text=e.target.result;
-      if(csvMode==='pnl'){const result=parseYuantaPnlCsv(text);parsedCsvRows=result.holdings;parsedPriceRow=result.priceRow;showCsvPreview(parsedCsvRows,result.totalMv);st.textContent=`解析完成：${parsedCsvRows.length-1} 筆持股`;st.className='status ok';}
-      else if(csvMode==='trades'){const result=parseYuantaTradesCsv(text);parsedCsvRows=result.rows;parsedPriceRow=null;showTradesPreview(result.rows,result.summary);st.textContent=`解析完成：${result.rows.length} 筆交易記錄`;st.className='status ok';}
+      if(csvMode==='pnl'){
+        const result=parseYuantaPnlCsv(text);
+        parsedCsvRows=result.holdings;
+        parsedPriceRow=result.priceRow;
+        // ── 自動 diff：從 Sheets 讀現有 holdings，推算新增/賣出 ──
+        st.textContent='比對現有持倉中...';
+        parsedDiffRows=[];
+        try{
+          const existRes=await gas({action:'read',sheet:'holdings'});
+          if(existRes.ok && existRes.data.length>1){
+            const hdr=existRes.data[0].map(h=>String(h).trim());
+            const tiCol=hdr.indexOf('ticker'),shCol=hdr.indexOf('shares'),avCol=hdr.indexOf('avg_cost'),prCol=hdr.indexOf('current_price'),nmCol=hdr.indexOf('name');
+            const oldMap={};
+            existRes.data.slice(1).filter(r=>r[tiCol]).forEach(r=>{
+              const code=String(r[tiCol]).padStart(4,'0');
+              oldMap[code]={sh:+r[shCol]||0,avg:+r[avCol]||0,name:String(r[nmCol]||code)};
+            });
+            const newMap={};
+            result.holdings.slice(1).forEach(r=>{
+              const code=String(r[0]).padStart(4,'0');
+              newMap[code]={sh:+r[2],avg:+r[3],price:+r[4],name:String(r[5]||code)};
+            });
+            const today=new Date().toISOString().slice(0,10);
+            const allCodes=new Set([...Object.keys(oldMap),...Object.keys(newMap)]);
+            allCodes.forEach(code=>{
+              const o=oldMap[code]||{sh:0,avg:0};
+              const n=newMap[code]||{sh:0,avg:0,price:0,name:''};
+              const diff=n.sh-o.sh;
+              if(diff===0) return;
+              let price=0;
+              if(diff>0){
+                // 買：從新均價反推這次買入的成交價
+                price=o.sh>0?Math.round(Math.abs((n.avg*n.sh-o.avg*o.sh)/diff)*100)/100:n.avg;
+              } else {
+                price=n.price||o.avg;
+              }
+              parsedDiffRows.push({date:today,code,name:n.name||o.name,side:diff>0?'買':'賣',qty:Math.abs(diff),price});
+            });
+          }
+        }catch(_){}
+        showPnlPreview(result.holdings, result.totalMv, parsedDiffRows);
+        const diffTxt=parsedDiffRows.length?`，偵測到 ${parsedDiffRows.length} 筆交易差異`:'（持倉無變動）';
+        st.textContent=`解析完成：${result.holdings.length-1} 筆持股${diffTxt}`;
+        st.className='status ok';
+      }
+      else if(csvMode==='trades'){
+        const result=parseYuantaTradesCsv(text);
+        parsedCsvRows=result.rows;
+        parsedPriceRow=null;
+        showTradesPreview(result.rows,result.summary);
+        st.textContent=`解析完成：${result.rows.length} 筆交易記錄`;
+        st.className='status ok';
+      }
     }catch(err){st.textContent='解析失敗：'+err.message;st.className='status err';}
   };
   reader.readAsText(file,'utf-8');
@@ -1463,6 +1515,47 @@ function showTradesPreview(rows,summary){
   tbl.innerHTML=`<thead><tr><th style="text-align:left">日期</th><th>代號</th><th>名稱</th><th>買賣</th><th style="text-align:right">股數</th><th style="text-align:right">單價</th></tr></thead><tbody>${preview.map(r=>`<tr><td>${r.date}</td><td>${r.code}</td><td>${r.name}</td><td style="color:${r.side==='買'?'var(--up)':'var(--dn)'}">${r.side}</td><td style="text-align:right">${r.qty.toLocaleString()}</td><td style="text-align:right">${r.price}</td></tr>`).join('')}<tr style="background:var(--gbg)"><td colspan="6" style="padding:6px 10px;font-size:12px;color:var(--t2)">共 ${rows.length} 筆 · 買入 ${summary.buy} · 賣出 ${summary.sell} · ${summary.codes.length} 支${rows.length>8?'（顯示前8筆）':''}</td></tr></tbody>`;
   document.getElementById('csv-preview-title').textContent='投資明細預覽';
 }
+function showPnlPreview(holdings, totalMv, diffRows){
+  document.getElementById('csv-preview').style.display='block';
+  document.getElementById('csv-upload-btn').style.display='inline-flex';
+  document.getElementById('csv-upload-btn').textContent='✓ 確認寫入（holdings + trades）';
+  const tbl=document.getElementById('csv-preview-table');
+  // 顯示 diff 的交易（重點），再附 holdings 摘要
+  let html='';
+  if(diffRows.length>0){
+    html+=`<thead><tr>
+      <th style="text-align:left">日期</th>
+      <th style="text-align:left">代號</th>
+      <th style="text-align:left">名稱</th>
+      <th>買賣</th>
+      <th style="text-align:right">股數差異</th>
+      <th style="text-align:right">估算單價</th>
+    </tr></thead><tbody>`;
+    diffRows.forEach(r=>{
+      const color=r.side==='買'?'var(--dn)':'var(--up)';
+      const sign=r.side==='買'?'+':'-';
+      html+=`<tr>
+        <td>${r.date}</td>
+        <td style="font-family:var(--mono)">${r.code}</td>
+        <td>${r.name}</td>
+        <td style="color:${color};font-weight:600">${r.side}</td>
+        <td style="text-align:right;color:${color};font-family:var(--mono)">${sign}${r.qty.toLocaleString()}</td>
+        <td style="text-align:right;font-family:var(--mono)">${r.price}</td>
+      </tr>`;
+    });
+    const totalStr=totalMv?`<tr style="background:var(--gbg)"><td colspan="6" style="font-family:var(--mono);color:var(--green);padding:6px 10px">總市值 NT$${Math.round(totalMv).toLocaleString()} · ${holdings.length-1} 支持股</td></tr>`:'';
+    html+=totalStr+'</tbody>';
+    document.getElementById('csv-preview-title').textContent=`偵測到 ${diffRows.length} 筆變動（將寫入 trades + 更新 holdings）`;
+  } else {
+    // 無差異，只顯示 holdings 摘要
+    html+=`<thead><tr><th style="text-align:left">代號</th><th style="text-align:left">名稱</th><th style="text-align:right">股數</th><th style="text-align:right">均價</th><th style="text-align:right">現價</th></tr></thead><tbody>`;
+    holdings.slice(1,6).forEach(r=>{html+=`<tr><td>${r[0]}</td><td>${r[5]}</td><td style="text-align:right">${r[2]}</td><td style="text-align:right">${r[3]}</td><td style="text-align:right">${r[4]}</td></tr>`;});
+    const totalStr=totalMv?`<tr style="background:var(--gbg)"><td colspan="5" style="font-family:var(--mono);color:var(--t2);padding:6px 10px">無持倉變動，只更新 holdings 現價</td></tr>`:'';
+    html+=totalStr+'</tbody>';
+    document.getElementById('csv-preview-title').textContent='持倉無變動，只更新現價';
+  }
+  tbl.innerHTML=html;
+}
 function showCsvPreview(rows,totalMv){
   document.getElementById('csv-preview').style.display='block';
   document.getElementById('csv-upload-btn').style.display='inline-flex';
@@ -1500,15 +1593,42 @@ async function uploadCsvToSheets(){
       document.getElementById('csv-upload-btn').textContent='✓ 確認寫入 Sheets';
       return;
     }
+    // ── 1. 寫入 trades（有差異才寫）──
+    if(parsedDiffRows.length>0){
+      st.textContent='讀取現有 trades...';pb.style.width='25%';
+      const existRes=await gas({action:'read',sheet:'trades'});
+      const existRows=existRes.ok?existRes.data:[];
+      const existKeys=new Set();
+      existRes.ok&&existRes.data.slice(1).forEach(r=>{
+        const d=r[0] instanceof Date?r[0].toISOString().slice(0,10):String(r[0]).slice(0,10);
+        existKeys.add(`${d}|${String(r[1]).padStart(4,'0')}|${r[3]}|${r[4]}`);
+      });
+      const tradeHeader=existRows[0]||['date','code','name','side','qty','price','note'];
+      const newTradeRows=parsedDiffRows
+        .filter(r=>!existKeys.has(`${r.date}|${r.code}|${r.side}|${r.qty}`))
+        .map(r=>[r.date,r.code,r.name,r.side,r.qty,r.price,'auto-from-pnl']);
+      if(newTradeRows.length>0){
+        st.textContent=`寫入 ${newTradeRows.length} 筆交易...`;pb.style.width='45%';
+        const allTradeData=[...existRes.data.slice(1),...newTradeRows].filter(r=>r[0]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+        const trRes=await gas({action:'write',sheet:'trades',rows:[tradeHeader,...allTradeData]});
+        if(!trRes.ok) throw new Error('trades 寫入失敗：'+trRes.error);
+      }
+    }
+    // ── 2. 更新 holdings ──
+    st.textContent='更新 holdings...';pb.style.width='65%';
     const res=await gas({action:'write',sheet:'holdings',rows:parsedCsvRows});
     if(!res.ok) throw new Error(res.error);
-    pb.style.width='60%';
+    pb.style.width='80%';
+    // ── 3. 寫入今日 prices ──
     if(parsedPriceRow&&Object.keys(parsedPriceRow.prices).length>0){
       const today=parsedPriceRow.date;
       const res2=await gas({action:'write_day_prices',date:today,prices:parsedPriceRow.prices,totalMv:parsedPriceRow.totalMv||0});
-      pb.style.width='90%';
-      st.textContent=res2.ok?`✓ holdings + prices(${today}) 已更新`:`✓ holdings 已更新（prices 寫入失敗：${res2.error}）`;
-    }else{st.textContent=`✓ holdings 已更新（${parsedCsvRows.length-1} 筆）`;}
+      pb.style.width='95%';
+      const tradeMsg=parsedDiffRows.length?` · trades +${parsedDiffRows.length}筆`:'';
+      st.textContent=res2.ok?`✓ holdings + prices(${today}) 已更新${tradeMsg}`:`✓ holdings 已更新${tradeMsg}（prices 失敗）`;
+    }else{
+      st.textContent=`✓ holdings 已更新（${parsedCsvRows.length-1} 筆）${parsedDiffRows.length?` · trades +${parsedDiffRows.length}筆`:''}`;
+    }
     pb.style.width='100%';st.className='status ok';clearCsvPreview();
     setTimeout(()=>refresh(),800);
   }catch(e){st.textContent='寫入失敗：'+e.message;st.className='status err';pb.style.width='0%';}
