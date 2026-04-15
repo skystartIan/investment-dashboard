@@ -1392,41 +1392,54 @@ function handleCsvFile(file){
         const result=parseYuantaPnlCsv(text);
         parsedCsvRows=result.holdings;
         parsedPriceRow=result.priceRow;
-        // ── 自動 diff：從 Sheets 讀現有 holdings，推算新增/賣出 ──
+        // ── 自動 diff：用 holdings 比對（shares/avg_cost 只有 XLS 上傳才會更新）──
         st.textContent='比對現有持倉中...';
         parsedDiffRows=[];
         try{
-          const existRes=await gas({action:'read',sheet:'holdings'});
-          if(existRes.ok && existRes.data.length>1){
-            const hdr=existRes.data[0].map(h=>String(h).trim());
-            const tiCol=hdr.indexOf('ticker'),shCol=hdr.indexOf('shares'),avCol=hdr.indexOf('avg_cost'),prCol=hdr.indexOf('current_price'),nmCol=hdr.indexOf('name');
-            const oldMap={};
-            existRes.data.slice(1).filter(r=>r[tiCol]).forEach(r=>{
-              const code=String(r[tiCol]).padStart(4,'0');
-              oldMap[code]={sh:+r[shCol]||0,avg:+r[avCol]||0,name:String(r[nmCol]||code)};
+          const holdRes=await gas({action:'read',sheet:'holdings'});
+          if(!holdRes.ok) throw new Error(holdRes.error||'讀取 holdings 失敗');
+
+          // 現有 holdings（上次 XLS 上傳的狀態）
+          const hdr=holdRes.data[0].map(h=>String(h).trim());
+          const tiCol=hdr.indexOf('ticker'),shCol=hdr.indexOf('shares'),
+                avCol=hdr.indexOf('avg_cost'),prCol=hdr.indexOf('current_price'),nmCol=hdr.indexOf('name');
+          const oldMap={};
+          holdRes.data.slice(1).filter(r=>r[tiCol]).forEach(r=>{
+            const code=String(r[tiCol]).padStart(4,'0');
+            oldMap[code]={sh:+r[shCol]||0,avg:+r[avCol]||0,name:String(r[nmCol]||code)};
+          });
+
+          // XLS 的持股
+          const newMap={};
+          result.holdings.slice(1).forEach(r=>{
+            const code=String(r[0]).padStart(4,'0');
+            newMap[code]={sh:+r[2],avg:+r[3],price:+r[4],name:String(r[5]||code)};
+          });
+
+          const today=new Date().toISOString().slice(0,10);
+          const allCodes=new Set([...Object.keys(oldMap),...Object.keys(newMap)]);
+          allCodes.forEach(code=>{
+            const o=oldMap[code]||{sh:0,avg:0,name:''};
+            const n=newMap[code]||{sh:0,avg:0,price:0,name:''};
+            const diff=Math.round(n.sh-o.sh);
+            if(diff===0) return;
+            let price=0;
+            if(diff>0){
+              // 買：從均價反推這批成交價
+              price=o.sh>0
+                ? Math.round(Math.abs((n.avg*n.sh - o.avg*o.sh)/diff)*100)/100
+                : n.avg;
+            } else {
+              price=n.price||o.avg; // 賣：用現價
+            }
+            parsedDiffRows.push({
+              date:today, code,
+              name:n.name||o.name,
+              side:diff>0?'買':'賣',
+              qty:Math.abs(diff),
+              price
             });
-            const newMap={};
-            result.holdings.slice(1).forEach(r=>{
-              const code=String(r[0]).padStart(4,'0');
-              newMap[code]={sh:+r[2],avg:+r[3],price:+r[4],name:String(r[5]||code)};
-            });
-            const today=new Date().toISOString().slice(0,10);
-            const allCodes=new Set([...Object.keys(oldMap),...Object.keys(newMap)]);
-            allCodes.forEach(code=>{
-              const o=oldMap[code]||{sh:0,avg:0};
-              const n=newMap[code]||{sh:0,avg:0,price:0,name:''};
-              const diff=n.sh-o.sh;
-              if(diff===0) return;
-              let price=0;
-              if(diff>0){
-                // 買：從新均價反推這次買入的成交價
-                price=o.sh>0?Math.round(Math.abs((n.avg*n.sh-o.avg*o.sh)/diff)*100)/100:n.avg;
-              } else {
-                price=n.price||o.avg;
-              }
-              parsedDiffRows.push({date:today,code,name:n.name||o.name,side:diff>0?'買':'賣',qty:Math.abs(diff),price});
-            });
-          }
+          });
         }catch(diffErr){
           st.textContent='diff 失敗：'+diffErr.message;
           st.className='status err';
@@ -1631,9 +1644,33 @@ async function uploadCsvToSheets(){
       }
     }
     // ── 2. 更新 holdings ──
+    // 規則：shares/avg_cost/name 從 XLS 更新；current_price 保留舊值（只有 ↻更新 才改）
+    //       不在 XLS 裡的股票（已賣出）→ 刪除
     st.textContent='更新 holdings...';pb.style.width='65%';
-    const res=await gas({action:'write',sheet:'holdings',rows:parsedCsvRows});
-    if(!res.ok) throw new Error(res.error);
+    {
+      const curHoldRes=await gas({action:'read',sheet:'holdings'});
+      let writeRows;
+      if(curHoldRes.ok && curHoldRes.data.length>1){
+        const hdr=curHoldRes.data[0].map(h=>String(h).trim());
+        const tiCol=hdr.indexOf('ticker'),prCol=hdr.indexOf('current_price');
+        // 現有現價 map
+        const priceMap={};
+        curHoldRes.data.slice(1).filter(r=>r[tiCol]).forEach(r=>{
+          priceMap[String(r[tiCol]).padStart(4,'0')]=+r[prCol]||0;
+        });
+        // XLS 的持股，注入現有現價
+        const xlsRows=parsedCsvRows.slice(1).map(r=>{
+          const code=String(r[0]).padStart(4,'0');
+          const existingPrice=priceMap[code]||r[4]; // 保留舊現價，沒有才用 XLS 的
+          return [r[0],r[1],r[2],r[3],existingPrice,r[5]];
+        });
+        writeRows=[parsedCsvRows[0],...xlsRows];
+      } else {
+        writeRows=parsedCsvRows; // holdings 是空的，直接用 XLS
+      }
+      const res=await gas({action:'write',sheet:'holdings',rows:writeRows});
+      if(!res.ok) throw new Error(res.error);
+    }
     pb.style.width='80%';
     // ── 3. 寫入今日 prices ──
     if(parsedPriceRow&&Object.keys(parsedPriceRow.prices).length>0){
