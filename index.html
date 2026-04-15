@@ -1427,9 +1427,13 @@ function handleCsvFile(file){
               parsedDiffRows.push({date:today,code,name:n.name||o.name,side:diff>0?'買':'賣',qty:Math.abs(diff),price});
             });
           }
-        }catch(_){}
+        }catch(diffErr){
+          st.textContent='diff 失敗：'+diffErr.message;
+          st.className='status err';
+          return;
+        }
         showPnlPreview(result.holdings, result.totalMv, parsedDiffRows);
-        const diffTxt=parsedDiffRows.length?`，偵測到 ${parsedDiffRows.length} 筆交易差異`:'（持倉無變動）';
+        const diffTxt=parsedDiffRows.length?`，偵測到 ${parsedDiffRows.length} 筆交易差異`:'（持倉無變動，只更新現價）';
         st.textContent=`解析完成：${result.holdings.length-1} 筆持股${diffTxt}`;
         st.className='status ok';
       }
@@ -1598,20 +1602,32 @@ async function uploadCsvToSheets(){
       st.textContent='讀取現有 trades...';pb.style.width='25%';
       const existRes=await gas({action:'read',sheet:'trades'});
       const existRows=existRes.ok?existRes.data:[];
+      // 去重：同一天同股同方向就不重複寫（不比 qty，避免型別問題）
       const existKeys=new Set();
       existRes.ok&&existRes.data.slice(1).forEach(r=>{
         const d=r[0] instanceof Date?r[0].toISOString().slice(0,10):String(r[0]).slice(0,10);
-        existKeys.add(`${d}|${String(r[1]).padStart(4,'0')}|${r[3]}|${r[4]}`);
+        existKeys.add(`${d}|${String(r[1]).padStart(4,'0')}|${String(r[3])}`);
       });
       const tradeHeader=existRows[0]||['date','code','name','side','qty','price','note'];
+      console.log('[pnl upload] parsedDiffRows:', parsedDiffRows);
+      console.log('[pnl upload] existKeys:', [...existKeys].slice(-5));
       const newTradeRows=parsedDiffRows
-        .filter(r=>!existKeys.has(`${r.date}|${r.code}|${r.side}|${r.qty}`))
+        .filter(r=>{
+          const key=`${r.date}|${r.code}|${r.side}`;
+          const dup=existKeys.has(key);
+          console.log(`  check ${key} → dup=${dup}`);
+          return !dup;
+        })
         .map(r=>[r.date,r.code,r.name,r.side,r.qty,r.price,'auto-from-pnl']);
+      console.log('[pnl upload] newTradeRows to write:', newTradeRows);
       if(newTradeRows.length>0){
         st.textContent=`寫入 ${newTradeRows.length} 筆交易...`;pb.style.width='45%';
         const allTradeData=[...existRes.data.slice(1),...newTradeRows].filter(r=>r[0]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
         const trRes=await gas({action:'write',sheet:'trades',rows:[tradeHeader,...allTradeData]});
+        console.log('[pnl upload] trades write result:', trRes);
         if(!trRes.ok) throw new Error('trades 寫入失敗：'+trRes.error);
+      } else {
+        st.textContent='trades 無新增（已存在相同記錄）';
       }
     }
     // ── 2. 更新 holdings ──
