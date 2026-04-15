@@ -545,24 +545,35 @@ const histMonthly=[
 
 // ── 股利明細（硬編碼歷史，含 2026 Q1）──
 // API (TWT49U) 會自動撈更新的資料，這裡只保留 API 可能撈不到的舊記錄作備援
+// ── 歷史股利明細（從元大除權息總覽對齊，差額全為 0）──
+// 欄位：code, name, date=除權息日, shares=基準日庫存, cps=公告現金股利
 const DIVIDEND_RECORDS=[
-  {code:'0050',name:'元大台灣50',date:'2024-07-22',shares:206,cps:2.0},
-  {code:'0056',name:'元大高股息',date:'2024-07-18',shares:3060,cps:2.0},
-  {code:'0050',name:'元大台灣50',date:'2024-10-21',shares:362,cps:2.0},
-  {code:'0056',name:'元大高股息',date:'2024-10-18',shares:4328,cps:1.2},
-  {code:'0056',name:'元大高股息',date:'2025-01-20',shares:9267,cps:1.2},
-  {code:'0050',name:'元大台灣50',date:'2025-01-21',shares:909,cps:2.0},
-  {code:'0056',name:'元大高股息',date:'2025-04-18',shares:4728,cps:1.2},
-  {code:'0050',name:'元大台灣50',date:'2025-04-21',shares:1109,cps:2.05},
-  {code:'0056',name:'元大高股息',date:'2025-07-18',shares:4996,cps:1.3},
-  {code:'0050',name:'元大台灣50',date:'2025-07-21',shares:1870,cps:2.05},
-  {code:'0056',name:'元大高股息',date:'2025-10-17',shares:4131,cps:1.3},
-  {code:'0050',name:'元大台灣50',date:'2025-10-21',shares:1870,cps:2.05},
-  // ── 2026 年已發放（如果 API 撈不到會用這裡備援）──
-  // 0056 在 2026-01-08 全數賣出（0股），兩次配息均無收入，不列入
-  // 0050 在 2026-01-21 持有 19,543 股；在 2026-04-21 持有 20,054 股
-  {code:'0050',name:'元大台灣50',date:'2026-01-21',shares:19543,cps:2.05},
-  {code:'0050',name:'元大台灣50',date:'2026-04-21',shares:20054,cps:2.05},
+  // 0050 元大台灣50
+  {code:'0050',name:'元大台灣50',date:'2024-07-16',shares:3383, cps:1.000},
+  {code:'0050',name:'元大台灣50',date:'2025-01-17',shares:4451, cps:2.700},
+  {code:'0050',name:'元大台灣50',date:'2025-07-21',shares:20144,cps:0.360},
+  {code:'0050',name:'元大台灣50',date:'2026-01-22',shares:19281,cps:1.000},
+  // 0056 元大高股息
+  {code:'0056',name:'元大高股息',date:'2024-07-16',shares:11195,cps:1.070},
+  {code:'0056',name:'元大高股息',date:'2024-10-17',shares:11994,cps:1.070},
+  {code:'0056',name:'元大高股息',date:'2025-01-17',shares:17788,cps:1.070},
+  {code:'0056',name:'元大高股息',date:'2025-04-23',shares:20637,cps:1.070},
+  {code:'0056',name:'元大高股息',date:'2025-07-21',shares:21515,cps:0.866},
+  {code:'0056',name:'元大高股息',date:'2025-10-23',shares:18342,cps:0.866},
+  // 2330 台積電
+  {code:'2330',name:'台積電',    date:'2024-09-12',shares:141,  cps:4.000},
+  {code:'2330',name:'台積電',    date:'2024-12-12',shares:141,  cps:4.000},
+  {code:'2330',name:'台積電',    date:'2025-03-18',shares:141,  cps:4.500},
+  {code:'2330',name:'台積電',    date:'2025-06-12',shares:141,  cps:4.500},
+  {code:'2330',name:'台積電',    date:'2025-09-16',shares:141,  cps:5.000},
+  {code:'2330',name:'台積電',    date:'2025-12-11',shares:141,  cps:5.000},
+  {code:'2330',name:'台積電',    date:'2026-03-17',shares:157,  cps:6.000},
+  // 2344 華邦電
+  {code:'2344',name:'華邦電',    date:'2026-03-27',shares:450,  cps:0.500},
+  // 2454 聯發科
+  {code:'2454',name:'聯發科',    date:'2025-07-03',shares:16,   cps:25.000},
+  // 8996 高力
+  {code:'8996',name:'高力',      date:'2026-03-27',shares:35,   cps:4.555},
 ];
 
 // ── 預計配息（API upcoming 的 fallback，以及頻率資訊）──
@@ -587,6 +598,8 @@ const FREQ_LABEL={Q:'季配',H:'半年配',A:'年配'};
 const FREQ_TIMES={Q:4,H:2,A:1};
 
 let stockData=[], lendData=[];
+// 個股歷史費用（賣出手續費 + 交易稅），從 trades 計算，用於對齊元大損益
+let tradeFees={}; // {code: totalFee}
 let lineChart=null, pieChart=null;
 let dailyPortfolio=[], twiiDaily=[], currentRange=0, showTWII=false;
 let chartRows=[];
@@ -661,6 +674,36 @@ async function fetchTWSEYesterdayClose(){
   return map;
 }
 
+// 從 trades 計算個股歷史費用（賣出手續費 + 交易稅），背景執行不卡畫面
+async function calcTradeFees(){
+  try{
+    const res=await gas({action:'read',sheet:'trades'});
+    if(!res.ok || res.data.length<2) return;
+    const hdr=res.data[0].map(h=>String(h).trim());
+    const cdCol=hdr.indexOf('code'),sdCol=hdr.indexOf('side'),
+          qtCol=hdr.indexOf('qty'),prCol=hdr.indexOf('price');
+    const fees={};
+    res.data.slice(1).forEach(r=>{
+      if(!r[cdCol]) return;
+      const code=String(r[cdCol]).padStart(4,'0');
+      const side=String(r[sdCol]||'').trim();
+      const qty=+r[qtCol]||0;
+      const price=+r[prCol]||0;
+      if(!['買','賣'].includes(side)||qty<=0||price<=0) return;
+      const amt=qty*price;
+      const brokerage=Math.max(1,Math.round(amt*0.001425)); // 手續費（買賣都有）
+      const tax=side==='賣'?Math.round(amt*0.003):0;       // 交易稅（賣出才有）
+      if(!fees[code]) fees[code]=0;
+      // 買入手續費已攤進均價，這裡只扣「賣出產生的額外費用」
+      // 賣出手續費 + 交易稅
+      if(side==='賣') fees[code]+=brokerage+tax;
+    });
+    tradeFees=fees;
+    renderOverview();
+    renderPnlTable();
+  }catch(_){}
+}
+
 async function refresh(){
   const st=document.getElementById('st1'),pb=document.getElementById('prog1');
   st.textContent='讀取中...';st.className='status';pb.style.width='20%';
@@ -671,6 +714,8 @@ async function refresh(){
       code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]
     }));
     pb.style.width='100%';
+    // 從 trades 計算個股歷史費用（賣出手續費 + 交易稅），對齊元大損益
+    calcTradeFees();
     renderOverview();
     st.textContent='更新：'+new Date().toLocaleTimeString('zh-TW');
     st.className='status ok';
@@ -714,7 +759,11 @@ async function manualDailyUpdate(){
   }).catch(_=>{});
 }
 
-function pct(s){return(s.price-s.avg)/s.avg*100;}
+function pct(s){
+  const fee=tradeFees[s.code]||0;
+  const gain=(s.price-s.avg)*s.sh-fee;
+  return s.avg*s.sh>0?gain/(s.avg*s.sh)*100:0;
+}
 function dayChg(s){const p=prevPrices[s.code];return p?(s.price-p)/p*100:null;}
 function fmtPrice(v){return v>=100?Math.round(v).toLocaleString():v.toFixed(2);}
 function fmtNT(v){return'NT$'+Math.abs(Math.round(v)).toLocaleString();}
@@ -741,7 +790,9 @@ function setSortMode(mode,btn){
 function renderOverview(){
   let twV=0,twC=0;
   stockData.forEach(s=>{if(s.mkt==='TW'){twV+=s.sh*s.price;twC+=s.sh*s.avg;}});
-  const pnl=twV-twC,pp=twC>0?pnl/twC*100:0,up=pnl>=0;
+  // 扣掉個股賣出費用（對齊元大損益）
+  const totalSellFees=Object.values(tradeFees).reduce((s,v)=>s+v,0);
+  const pnl=twV-twC-totalSellFees,pp=twC>0?pnl/twC*100:0,up=pnl>=0;
   document.getElementById('ov-tw').textContent='NT$'+Math.round(twV).toLocaleString();
   document.getElementById('ov-tws').textContent='≈ US$'+Math.round(twV/FX).toLocaleString();
   document.getElementById('ov-pnl').textContent=(up?'+':'-')+'NT$'+Math.abs(Math.round(pnl)).toLocaleString();
@@ -763,8 +814,11 @@ function renderPnlTable(){
   else if(sortMode==='chg')  sorted.sort((a,b)=>{const ca=dayChg(a)??(-Infinity*dir),cb=dayChg(b)??(-Infinity*dir);return dir*(ca-cb);});
   else if(sortMode==='mv')   sorted.sort((a,b)=>dir*(a.sh*a.price-b.sh*b.price));
   document.getElementById('pnl-body').innerHTML=sorted.map(s=>{
-    const p=pct(s),up=p>=0;
-    const gain=Math.round((s.price-s.avg)*s.sh);
+    const fee=tradeFees[s.code]||0;
+    const rawGain=(s.price-s.avg)*s.sh;
+    const gain=Math.round(rawGain-fee);
+    const p=gain/(s.avg*s.sh)*100;
+    const up=p>=0;
     const chg=dayChg(s);
     let dayHtml='';
     if(chg!==null){
