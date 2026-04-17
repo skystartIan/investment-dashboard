@@ -646,6 +646,7 @@ let stockData=[], lendData=[], usStockData=[];
 let tradeFees={}; // {code: totalFee}
 let currentMarket='TW'; // TW / US / ALL
 let ibCashUSD=0; // IB 現金餘額（USD，負值=融資）
+let ibNavUSD=0;  // IB NAV（USD）
 let fxRate=32.5; // USD/TWD 動態匯率
 let week52Data={}; // {code: {high, low}}
 let realtimePrices={}; // 美股即時價格 {ticker: {price, prevClose}}
@@ -796,7 +797,11 @@ async function loadUSStockData() {
     // 背景抓即時價和現金
     loadUSRealtimePrices();
     gas({action:'read_ib_cash'}).then(r=>{
-      if(r.ok) { ibCashUSD=r.cash; if(currentMarket==='US'||currentMarket==='ALL') renderOverview(); }
+      if(r.ok) {
+        ibCashUSD=r.cash||0;
+        ibNavUSD=r.nav||0;
+        if(currentMarket==='US'||currentMarket==='ALL') renderOverview();
+      }
     }).catch(_=>{});
   } catch(_) {}
 }
@@ -973,7 +978,7 @@ function renderOverview(){
       const prev=prevPricesUS[s.code];
       if(prev&&prev>0) usTodayPnl+=(s.price-prev)*s.sh;
     });
-    const navUSD = usMv + ibCashUSD;
+    const navUSD = ibNavUSD > 0 ? ibNavUSD : usMv + ibCashUSD; // 優先用 IB 的 NAV
     const pp=usCost>0?usPnl/usCost*100:0;
     const up=usPnl>=0, tup=usTodayPnl>=0, cup=ibCashUSD>=0;
 
