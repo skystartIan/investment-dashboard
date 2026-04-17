@@ -251,15 +251,9 @@ table.div-tbl tr:hover td{background:var(--surf2)}
   <div class="prog"><div class="prog-bar" id="prog1"></div></div>
   <div class="status" id="st1"></div>
   <!-- 費用規則附註 -->
-  <div style="margin:8px 0 16px;padding:10px 14px;background:var(--surf2);border-radius:8px;border:1px solid var(--b)">
-    <div style="font-size:11px;color:var(--t2);margin-bottom:6px;font-weight:600;letter-spacing:.04em">手續費規則</div>
-    <div style="font-size:11px;color:var(--t2);line-height:1.8;font-family:var(--mono)">
-      手續費規則：手續費折扣 <span style="color:var(--green);font-weight:600">6折</span>（0.1425% × 0.6）；交易稅 0.3%（定期定額免交易稅）<br>
-      定期定額（0050/0056/2330）：手續費 <span style="color:var(--green)">1元</span>・免交易稅<br>
-      盤中零股 買入：手續費 <span style="color:var(--green)">6折</span>・免交易稅<br>
-      盤中零股 賣出：手續費 <span style="color:var(--green)">6折</span>・交易稅 <span style="color:var(--green)">0.3%</span><br>
-      整張 買入：手續費 <span style="color:var(--green)">6折</span>・免交易稅<br>
-      整張 賣出：手續費 <span style="color:var(--green)">6折</span>・交易稅 <span style="color:var(--green)">0.3%</span>
+  <div style="margin:8px 0 16px;padding:8px 12px;background:var(--surf2);border-radius:8px;border:1px solid var(--b)">
+    <div style="font-size:11px;color:var(--t2);line-height:1.7">
+      <b style="color:var(--t)">手續費規則</b>：手續費折扣 <span style="color:var(--green)">6折</span>（0.1425% × 0.6）；交易稅 <span style="color:var(--green)">0.3%</span>（定期定額免交易稅）
     </div>
   </div>
 </div>
@@ -487,6 +481,31 @@ table.div-tbl tr:hover td{background:var(--surf2)}
   </div>
 
   <div class="card">
+    <div class="card-title">🔧 補齊歷史費用（一次性）</div>
+    <div style="font-size:12px;color:var(--t2);margin-bottom:12px;line-height:1.6">
+      上傳所有歷史投資明細 XLS，自動將 trade_type / fee / tax 補齊到 trades 表。<br>
+      <span style="color:var(--t3)">完成後此功能即可不再使用。</span>
+    </div>
+    <div id="patch-drop-zone"
+      style="border:2px dashed var(--b2);border-radius:var(--r);padding:20px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:10px"
+      onclick="document.getElementById('patch-file-input').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--green)';this.style.background='var(--gbg)'"
+      ondragleave="this.style.borderColor='var(--b2)';this.style.background=''"
+      ondrop="handlePatchDrop(event)">
+      <div style="font-size:20px;margin-bottom:4px">📂</div>
+      <div style="font-size:13px;color:var(--t2)">可同時選擇多個投資明細 .xls</div>
+      <input type="file" id="patch-file-input" accept=".xls,.xlsx" multiple style="display:none" onchange="handlePatchFiles(this.files)">
+    </div>
+    <div id="patch-preview" style="display:none;margin-bottom:10px;font-size:12px;color:var(--t2)"></div>
+    <div class="btns">
+      <button class="btn btn-p" id="patch-btn" onclick="patchHistoryFees()" style="display:none">✓ 補齊寫入 trades</button>
+      <button class="btn" onclick="clearPatch()">清除</button>
+    </div>
+    <div class="prog"><div class="prog-bar" id="prog-patch"></div></div>
+    <div class="status" id="st-patch"></div>
+  </div>
+
+  <div class="card">
     <div class="card-title">📤 上傳元大 CSV（每日更新）</div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <button class="sort-btn on" id="csv-mode-pnl" onclick="setCsvMode('pnl',this)">未實現損益</button>
@@ -672,36 +691,45 @@ async function fetchTWSEYesterdayClose(){
 }
 
 // 從 trades 計算個股歷史費用（賣出手續費 + 交易稅），背景執行不卡畫面
-// 定期定額標的（0050/0056/2330）：手續費1元、免交易稅
+// 定期定額標的（0050/0056/2330）：手續費1元、免交易稅（無 trade_type 時用 code 猜）
 const DCA_CODES=new Set(['0050','0056','2330']);
-// 手續費6折
-const FEE_RATE=0.001425*0.6;
+const FEE_RATE=0.001425*0.6; // 手續費6折
 
 async function calcTradeFees(){
   try{
     const res=await gas({action:'read',sheet:'trades'});
     if(!res.ok || res.data.length<2) return;
     const hdr=res.data[0].map(h=>String(h).trim());
-    const cdCol=hdr.indexOf('code'),sdCol=hdr.indexOf('side'),
-          qtCol=hdr.indexOf('qty'),prCol=hdr.indexOf('price');
+    const cdCol=hdr.indexOf('code'), sdCol=hdr.indexOf('side'),
+          qtCol=hdr.indexOf('qty'),  prCol=hdr.indexOf('price'),
+          ttCol=hdr.indexOf('trade_type'), feeCol=hdr.indexOf('fee'), taxCol=hdr.indexOf('tax');
     const fees={};
     res.data.slice(1).forEach(r=>{
       if(!r[cdCol]) return;
       const code=String(r[cdCol]).padStart(4,'0');
       const side=String(r[sdCol]||'').trim();
-      const qty=+r[qtCol]||0;
-      const price=+r[prCol]||0;
-      if(!['買','賣'].includes(side)||qty<=0||price<=0) return;
+      if(!['買','賣'].includes(side)) return;
+      if(side!=='賣') return; // 只計算賣出費用（買入已攤進均價）
       if(!fees[code]) fees[code]=0;
-      const amt=qty*price;
-      const isDCA=DCA_CODES.has(code)&&side==='買';
-      // 手續費：定期定額=1元，其他=6折
-      const brokerage=isDCA?1:Math.max(1,Math.round(amt*FEE_RATE));
-      // 交易稅：買入=0，賣出=0.3% floor
-      const tax=side==='賣'?Math.floor(amt*0.003):0;
-      // 買入和賣出手續費都扣（元大均價是純成本，手續費另外計）
-      if(!fees[code]) fees[code]=0;
-      fees[code]+=brokerage+tax;
+
+      // 優先用 trades 表的 fee/tax（有上傳投資明細 XLS 的才有）
+      const hasFeeData=feeCol>=0 && taxCol>=0 && (r[feeCol]!==''&&r[feeCol]!==undefined);
+      if(hasFeeData){
+        const f=+r[feeCol]||0;
+        const t=+r[taxCol]||0;
+        fees[code]+=f+t;
+      } else {
+        // 沒有資料：用公式估算
+        const qty=+r[qtCol]||0;
+        const price=+r[prCol]||0;
+        if(qty<=0||price<=0) return;
+        const amt=qty*price;
+        const tradeType=ttCol>=0?String(r[ttCol]||'').trim():'';
+        const isDCA=tradeType==='定期定額'||(tradeType===''&&DCA_CODES.has(code));
+        const brokerage=isDCA?1:Math.max(1,Math.round(amt*FEE_RATE));
+        const tax=isDCA?0:Math.floor(amt*0.003);
+        fees[code]+=brokerage+tax;
+      }
     });
     tradeFees=fees;
     renderOverview();
@@ -1595,6 +1623,7 @@ function parseYuantaPnlCsv(text){
   return{holdings,priceRow,totalMv};
 }
 function parseYuantaTradesCsv(text){
+  // XLS 欄位：[0]日期 [1]代號 [2]名稱 [3]交易種類 [4]買賣 [5]交易類別 [6]數量 [7]單價 [8]價金 [9]手續費 [10]交易稅
   const rows=[];const summary={buy:0,sell:0,codes:new Set()};
   const doc=new DOMParser().parseFromString(text,'text/html');
   const trs=[...doc.querySelectorAll('tr')];
@@ -1608,14 +1637,17 @@ function parseYuantaTradesCsv(text){
     const date=dateRaw.replace(/\//g,'-').slice(0,10);
     const code=(cells[1]||'').trim().padStart(4,'0');
     const name=(cells[2]||'').trim();
+    const tradeType=(cells[3]||'').trim();   // 交易種類：盤中零股/定期定額
     const side=(cells[4]||'').trim();
     const qty=parseInt((cells[6]||'0').replace(/,/g,''));
     const price=parseFloat((cells[7]||'0').replace(/,/g,''));
+    const fee=parseInt((cells[9]||'0').replace(/,/g,''))||0;
+    const tax=parseInt((cells[10]||'0').replace(/,/g,''))||0;
     if(!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
     if(!/^\d{4}$/.test(code)) continue;
     if(!['買','賣'].includes(side)) continue;
     if(isNaN(qty)||qty<=0) continue;
-    rows.push({date,code,name,side,qty,price});
+    rows.push({date,code,name,side,qty,price,tradeType,fee,tax});
     if(side==='買') summary.buy++;else summary.sell++;
     summary.codes.add(code);
   }
@@ -1628,7 +1660,19 @@ function showTradesPreview(rows,summary){
   document.getElementById('csv-upload-btn').textContent='✓ 寫入 trades 表';
   const tbl=document.getElementById('csv-preview-table');
   const preview=rows.slice(0,8);
-  tbl.innerHTML=`<thead><tr><th style="text-align:left">日期</th><th>代號</th><th>名稱</th><th>買賣</th><th style="text-align:right">股數</th><th style="text-align:right">單價</th></tr></thead><tbody>${preview.map(r=>`<tr><td>${r.date}</td><td>${r.code}</td><td>${r.name}</td><td style="color:${r.side==='買'?'var(--up)':'var(--dn)'}">${r.side}</td><td style="text-align:right">${r.qty.toLocaleString()}</td><td style="text-align:right">${r.price}</td></tr>`).join('')}<tr style="background:var(--gbg)"><td colspan="6" style="padding:6px 10px;font-size:12px;color:var(--t2)">共 ${rows.length} 筆 · 買入 ${summary.buy} · 賣出 ${summary.sell} · ${summary.codes.length} 支${rows.length>8?'（顯示前8筆）':''}</td></tr></tbody>`;
+  tbl.innerHTML=`<thead><tr>
+    <th style="text-align:left">日期</th><th>代號</th><th>名稱</th>
+    <th>種類</th><th>買賣</th><th style="text-align:right">股數</th>
+    <th style="text-align:right">單價</th><th style="text-align:right">手續費</th><th style="text-align:right">交易稅</th>
+  </tr></thead><tbody>${preview.map(r=>`<tr>
+    <td>${r.date}</td><td>${r.code}</td><td>${r.name}</td>
+    <td style="font-size:11px;color:var(--t2)">${r.tradeType||''}</td>
+    <td style="color:${r.side==='買'?'var(--dn)':'var(--up)'}">${r.side}</td>
+    <td style="text-align:right">${r.qty.toLocaleString()}</td>
+    <td style="text-align:right">${r.price}</td>
+    <td style="text-align:right">${r.fee||0}</td>
+    <td style="text-align:right">${r.tax||0}</td>
+  </tr>`).join('')}<tr style="background:var(--gbg)"><td colspan="9" style="padding:6px 10px;font-size:12px;color:var(--t2)">共 ${rows.length} 筆 · 買入 ${summary.buy} · 賣出 ${summary.sell} · ${summary.codes.length} 支${rows.length>8?'（顯示前8筆）':''}</td></tr></tbody>`;
   document.getElementById('csv-preview-title').textContent='投資明細預覽';
 }
 function showPnlPreview(holdings, totalMv, diffRows){
@@ -1682,6 +1726,147 @@ function showCsvPreview(rows,totalMv){
   document.getElementById('csv-preview-title').textContent=`預覽（共 ${rows.length-1} 筆${rows.length-1>8?'，顯示前8筆':''}）`;
 }
 function clearCsvPreview(){parsedCsvRows=null;parsedPriceRow=null;document.getElementById('csv-preview').style.display='none';document.getElementById('csv-upload-btn').style.display='none';document.getElementById('st-csv').textContent='';document.getElementById('csv-file-input').value='';}
+
+// ── 補齊歷史費用（一次性）──
+let patchParsed=[]; // 合併所有 XLS 的記錄
+
+function handlePatchDrop(e){
+  e.preventDefault();
+  document.getElementById('patch-drop-zone').style.borderColor='var(--b2)';
+  document.getElementById('patch-drop-zone').style.background='';
+  handlePatchFiles(e.dataTransfer.files);
+}
+
+async function handlePatchFiles(files){
+  if(!files||!files.length) return;
+  const st=document.getElementById('st-patch');
+  st.textContent='解析中...';st.className='status';
+  patchParsed=[];
+  let total=0;
+  for(const file of files){
+    const text=await file.text();
+    const rows=parsePatchXls(text);
+    patchParsed.push(...rows);
+    total+=rows.length;
+  }
+  // 去重（同 date+code+side+qty 只保留一筆）
+  const seen=new Set();
+  patchParsed=patchParsed.filter(r=>{
+    const k=`${r.date}|${r.code}|${r.side}|${r.qty}`;
+    if(seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+  document.getElementById('patch-preview').style.display='block';
+  document.getElementById('patch-preview').textContent=`已解析 ${files.length} 個檔案，共 ${patchParsed.length} 筆記錄（去重後）`;
+  document.getElementById('patch-btn').style.display='inline-flex';
+  st.textContent=`解析完成`;st.className='status ok';
+}
+
+function parsePatchXls(text){
+  const rows=[];
+  const doc=new DOMParser().parseFromString(text,'text/html');
+  const trs=[...doc.querySelectorAll('tr')];
+  for(const tr of trs){
+    const cells=[...tr.querySelectorAll('td')].map(c=>c.textContent.trim());
+    if(cells.length<11) continue;
+    const dateRaw=cells[0]||'';
+    if(!dateRaw.match(/^\d{4}[\/\-]\d{2}[\/\-]\d{2}/)) continue;
+    const date=dateRaw.replace(/\//g,'-').slice(0,10);
+    const code=(cells[1]||'').trim().padStart(4,'0');
+    if(!/^\d{4}$/.test(code)) continue;
+    const tradeType=(cells[3]||'').trim();
+    const side=(cells[4]||'').trim();
+    if(!['買','賣'].includes(side)) continue;
+    const qty=parseInt((cells[6]||'0').replace(/,/g,''));
+    const fee=parseInt((cells[9]||'0').replace(/,/g,''))||0;
+    const tax=parseInt((cells[10]||'0').replace(/,/g,''))||0;
+    if(isNaN(qty)||qty<=0) continue;
+    rows.push({date,code,side,qty,tradeType,fee,tax});
+  }
+  return rows;
+}
+
+function clearPatch(){
+  patchParsed=[];
+  document.getElementById('patch-preview').style.display='none';
+  document.getElementById('patch-btn').style.display='none';
+  document.getElementById('st-patch').textContent='';
+  document.getElementById('patch-file-input').value='';
+}
+
+async function patchHistoryFees(){
+  const st=document.getElementById('st-patch'),pb=document.getElementById('prog-patch');
+  if(!patchParsed.length){st.textContent='請先上傳檔案';st.className='status err';return;}
+  st.textContent='讀取 trades 表...';st.className='status';pb.style.width='10%';
+
+  // 建立 XLS key map
+  const xlsMap={};
+  patchParsed.forEach(r=>{
+    xlsMap[`${r.date}|${r.code}|${r.side}|${r.qty}`]={tradeType:r.tradeType,fee:r.fee,tax:r.tax};
+  });
+
+  const res=await gas({action:'read',sheet:'trades'});
+  if(!res.ok||res.data.length<2){st.textContent='讀取失敗';st.className='status err';return;}
+  pb.style.width='30%';
+
+  const hdr=res.data[0].map(h=>String(h).trim());
+  // 確保 header 有 trade_type, fee, tax
+  let ttCol=hdr.indexOf('trade_type'),feeCol=hdr.indexOf('fee'),taxCol=hdr.indexOf('tax');
+  if(ttCol<0){hdr.push('trade_type');ttCol=hdr.length-1;}
+  if(feeCol<0){hdr.push('fee');feeCol=hdr.length-1;}
+  if(taxCol<0){hdr.push('tax');taxCol=hdr.length-1;}
+
+  const dtCol=hdr.indexOf('date'),cdCol=hdr.indexOf('code'),
+        sdCol=hdr.indexOf('side'),qtCol=hdr.indexOf('qty');
+
+  let matched=0,guessed=0;
+  const newData=res.data.slice(1).map(row=>{
+    // 補齊長度
+    while(row.length<hdr.length) row.push('');
+    if(!row[cdCol]) return row;
+    const date=(row[dtCol] instanceof Date?row[dtCol].toISOString():String(row[dtCol])).slice(0,10);
+    const code=String(row[cdCol]).padStart(4,'0');
+    const side=String(row[sdCol]||'').trim();
+    const qty=+row[qtCol]||0;
+    const key=`${date}|${code}|${side}|${qty}`;
+
+    if(xlsMap[key]){
+      // XLS 有資料 → 覆蓋
+      row[ttCol]=xlsMap[key].tradeType;
+      row[feeCol]=xlsMap[key].fee;
+      row[taxCol]=xlsMap[key].tax;
+      matched++;
+    } else {
+      // 沒有 XLS 資料 → 用 code 猜 trade_type，公式算費用
+      if(!row[ttCol]){
+        row[ttCol]=DCA_CODES.has(code)?'定期定額':'盤中零股';
+        guessed++;
+      }
+      if(!row[feeCol]&&side==='賣'){
+        const amt=qty*(+row[hdr.indexOf('price')]||0);
+        const isDCA=row[ttCol]==='定期定額';
+        row[feeCol]=isDCA?1:Math.max(1,Math.round(amt*FEE_RATE));
+        row[taxCol]=isDCA?0:Math.floor(amt*0.003);
+      }
+    }
+    return row;
+  });
+
+  pb.style.width='70%';
+  st.textContent='寫入 trades 表...';
+  const res2=await gas({action:'write',sheet:'trades',rows:[hdr,...newData]});
+  pb.style.width='100%';
+  if(res2.ok){
+    st.textContent=`✓ 完成！XLS 對應 ${matched} 筆，code 猜測 ${guessed} 筆`;
+    st.className='status ok';
+    clearPatch();
+    calcTradeFees(); // 重新計算費用
+  } else {
+    st.textContent='寫入失敗：'+res2.error;
+    st.className='status err';
+  }
+}
+
 async function uploadCsvToSheets(){
   const minLen=csvMode==='trades'?1:2;
   if(!parsedCsvRows||parsedCsvRows.length<minLen){document.getElementById('st-csv').textContent='沒有可寫入的資料';document.getElementById('st-csv').className='status err';return;}
@@ -1694,8 +1879,8 @@ async function uploadCsvToSheets(){
       const existRows=existRes.ok?existRes.data:[];
       const existKeys=new Set();
       existRows.slice(1).forEach(r=>{const d=r[0] instanceof Date?r[0].toISOString().slice(0,10):String(r[0]).slice(0,10);existKeys.add(`${d}|${String(r[1]).padStart(4,'0')}|${r[3]}|${r[4]}`);});
-      const header=existRows[0]||['date','code','name','side','qty','price','note'];
-      const newRows=parsedCsvRows.filter(r=>!existKeys.has(`${r.date}|${r.code}|${r.side}|${r.qty}`)).map(r=>[r.date,r.code,r.name,r.side,r.qty,r.price,'']);
+      const header=existRows[0]||['date','code','name','side','qty','price','note','trade_type','fee','tax'];
+      const newRows=parsedCsvRows.filter(r=>!existKeys.has(`${r.date}|${r.code}|${r.side}|${r.qty}`)).map(r=>[r.date,r.code,r.name,r.side,r.qty,r.price,'',r.tradeType||'',r.fee||0,r.tax||0]);
       if(newRows.length===0){st.textContent='沒有新記錄（全部已存在）';st.className='status ok';pb.style.width='100%';clearCsvPreview();return;}
       const allData=[...existRows.slice(1),...newRows].filter(r=>r[0]).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
       const writeRows=[header,...allData];
