@@ -246,11 +246,20 @@ table.div-tbl tr:hover td{background:var(--surf2)}
 
 <!-- 總覽 -->
 <div class="panel on" id="panel-overview">
-  <div class="metrics">
-    <div class="mc"><div class="mc-l">台股市值</div><div class="mc-v" id="ov-tw">—</div><div class="mc-s" id="ov-tws"></div></div>
+  <!-- 台股/整體：4張卡片 -->
+  <div class="metrics" id="metrics-tw">
+    <div class="mc"><div class="mc-l" id="ov-mv-label">台股市值</div><div class="mc-v" id="ov-tw">—</div><div class="mc-s" id="ov-tws"></div></div>
     <div class="mc"><div class="mc-l">今日損益</div><div class="mc-v" id="ov-today">—</div><div class="mc-s" id="ov-todays"></div></div>
     <div class="mc"><div class="mc-l">未實現損益</div><div class="mc-v" id="ov-pnl">—</div><div class="mc-s" id="ov-pnls"></div></div>
     <div class="mc"><div class="mc-l">報酬率</div><div class="mc-v" id="ov-ret">—</div><div class="mc-s" style="color:var(--t2)">整體</div></div>
+  </div>
+  <!-- 美股：5張卡片 -->
+  <div class="metrics" id="metrics-us" style="display:none">
+    <div class="mc"><div class="mc-l">NAV</div><div class="mc-v" id="ov-us-nav">—</div><div class="mc-s" id="ov-us-navs"></div></div>
+    <div class="mc"><div class="mc-l">現金</div><div class="mc-v" id="ov-us-cash">—</div><div class="mc-s" style="color:var(--t2)">USD（含融資）</div></div>
+    <div class="mc"><div class="mc-l">今日損益</div><div class="mc-v" id="ov-us-today">—</div><div class="mc-s" id="ov-us-todays"></div></div>
+    <div class="mc"><div class="mc-l">未實現損益</div><div class="mc-v" id="ov-us-pnl">—</div><div class="mc-s" id="ov-us-pnls"></div></div>
+    <div class="mc"><div class="mc-l">報酬率</div><div class="mc-v" id="ov-us-ret">—</div><div class="mc-s" style="color:var(--t2)">整體</div></div>
   </div>
   <div class="card">
     <div class="card-title">
@@ -636,6 +645,7 @@ let stockData=[], lendData=[], usStockData=[];
 // 個股歷史費用（賣出手續費 + 交易稅），從 trades 計算，用於對齊元大損益
 let tradeFees={}; // {code: totalFee}
 let currentMarket='TW'; // TW / US / ALL
+let ibCashUSD=0; // IB 現金餘額（USD，負值=融資）
 let fxRate=32.5; // USD/TWD 動態匯率
 let week52Data={}; // {code: {high, low}}
 let realtimePrices={}; // 美股即時價格 {ticker: {price, prevClose}}
@@ -783,8 +793,11 @@ async function loadUSStockData() {
         name:   String(r[nmCol]||r[tiCol]).trim(),
         ibPnl:  ibPnlCol>=0 ? (+r[ibPnlCol]||0) : null // IB 未實現損益 USD
       }));
-    // 背景抓即時價
+    // 背景抓即時價和現金
     loadUSRealtimePrices();
+    gas({action:'read_ib_cash'}).then(r=>{
+      if(r.ok) { ibCashUSD=r.cash; if(currentMarket==='US'||currentMarket==='ALL') renderOverview(); }
+    }).catch(_=>{});
   } catch(_) {}
 }
 
@@ -944,10 +957,55 @@ function setSortMode(mode,btn){
 
 function renderOverview(){
   const mkt = currentMarket;
-  let mv=0, cost=0, todayPnl=0, pnlAdj=0;
-  const upColorFn = mkt==='US' ? usColor : twColor;
 
-  if(mkt==='TW'||mkt==='ALL'){
+  // 切換卡片顯示
+  document.getElementById('metrics-tw').style.display = mkt==='US' ? 'none' : '';
+  document.getElementById('metrics-us').style.display = mkt==='US' ? '' : 'none';
+
+  if(mkt==='US'){
+    // ── 美股五張卡片 ──
+    let usMv=0, usCost=0, usPnl=0, usTodayPnl=0;
+    usStockData.forEach(s=>{
+      usMv+=s.sh*s.price;
+      usCost+=s.sh*s.avg;
+      if(s.ibPnl!==null&&s.ibPnl!==undefined) usPnl+=s.ibPnl;
+      else usPnl+=s.sh*s.price-s.sh*s.avg;
+      const prev=prevPricesUS[s.code];
+      if(prev&&prev>0) usTodayPnl+=(s.price-prev)*s.sh;
+    });
+    const navUSD = usMv + ibCashUSD;
+    const pp=usCost>0?usPnl/usCost*100:0;
+    const up=usPnl>=0, tup=usTodayPnl>=0, cup=ibCashUSD>=0;
+
+    // NAV
+    document.getElementById('ov-us-nav').textContent=`USD ${Math.round(navUSD).toLocaleString()}`;
+    document.getElementById('ov-us-navs').textContent=`NT$${Math.round(navUSD*fxRate).toLocaleString()}`;
+
+    // 現金
+    document.getElementById('ov-us-cash').textContent=(cup?'+':'')+'$'+Math.round(ibCashUSD).toLocaleString();
+    document.getElementById('ov-us-cash').className='mc-v '+(cup?'dn':'up'); // 美股：綠正紅負
+
+    // 今日損益
+    const hasPrevUS=Object.keys(prevPricesUS).length>0;
+    document.getElementById('ov-us-today').textContent=hasPrevUS?(tup?'+':'−')+'$'+Math.abs(Math.round(usTodayPnl)).toLocaleString():'—';
+    document.getElementById('ov-us-today').className='mc-v '+(tup?'dn':'up');
+    const todayPct=usMv>0?(usTodayPnl/(usMv-usTodayPnl)*100):0;
+    document.getElementById('ov-us-todays').textContent=hasPrevUS?(tup?'+':'')+todayPct.toFixed(2)+'%':'';
+    document.getElementById('ov-us-todays').className=tup?'dn':'up';
+
+    // 未實現損益
+    document.getElementById('ov-us-pnl').textContent=(up?'+':'−')+'$'+Math.abs(Math.round(usPnl)).toLocaleString();
+    document.getElementById('ov-us-pnl').className='mc-v '+(up?'dn':'up');
+    document.getElementById('ov-us-pnls').textContent=(up?'+':'')+pp.toFixed(1)+'%';
+    document.getElementById('ov-us-pnls').className=up?'dn':'up';
+
+    // 報酬率
+    document.getElementById('ov-us-ret').textContent=(up?'+':'')+pp.toFixed(2)+'%';
+    document.getElementById('ov-us-ret').className='mc-v '+(up?'dn':'up');
+
+  } else {
+    // ── 台股/整體四張卡片 ──
+    let mv=0, cost=0, todayPnl=0, pnlAdj=0;
     stockData.forEach(s=>{
       if(s.mkt!=='TW') return;
       mv+=s.sh*s.price; cost+=s.sh*s.avg;
@@ -956,53 +1014,37 @@ function renderOverview(){
     });
     const sellFees=Object.values(tradeFees).reduce((a,v)=>a+v,0);
     pnlAdj=mv-cost-sellFees;
-  }
-  if(mkt==='US'||mkt==='ALL'){
-    usStockData.forEach(s=>{
-      const usMv=s.sh*s.price*fxRate;
-      const usCost=s.sh*s.avg*fxRate;
-      mv+=usMv; cost+=usCost;
-      const prev=prevPricesUS[s.code];
-      if(prev&&prev>0) todayPnl+=Math.round((s.price-prev)*s.sh*fxRate);
-      // 用 ib_pnl（IB 計算的未實現損益）若有的話
-      if(s.ibPnl!==null&&s.ibPnl!==undefined) pnlAdj+=s.ibPnl*fxRate;
-      else pnlAdj+=usMv-usCost;
-    });
-  }
 
-  const pp=cost>0?pnlAdj/cost*100:0, up=pnlAdj>=0;
-  const tup=todayPnl>=0;
+    if(mkt==='ALL'){
+      usStockData.forEach(s=>{
+        mv+=s.sh*s.price*fxRate; cost+=s.sh*s.avg*fxRate;
+        const prev=prevPricesUS[s.code];
+        if(prev&&prev>0) todayPnl+=Math.round((s.price-prev)*s.sh*fxRate);
+        if(s.ibPnl!==null&&s.ibPnl!==undefined) pnlAdj+=s.ibPnl*fxRate;
+        else pnlAdj+=(s.sh*s.price-s.sh*s.avg)*fxRate;
+      });
+    }
 
-  // 市值卡片
-  const mvLabel = mkt==='TW'?'台股市值':mkt==='US'?'美股市值':'總市值';
-  document.querySelector('#panel-overview .mc:first-child .mc-l').textContent=mvLabel;
-  document.getElementById('ov-tw').textContent='NT$'+Math.round(mv).toLocaleString();
-  document.getElementById('ov-tws').textContent=
-    mkt==='US'?`USD ${Math.round(mv/fxRate).toLocaleString()}`:
-    mkt==='TW'?`≈ US$${Math.round(mv/fxRate).toLocaleString()}`:
-    `≈ US$${Math.round(mv/fxRate).toLocaleString()}`;
+    const pp=cost>0?pnlAdj/cost*100:0, up=pnlAdj>=0, tup=todayPnl>=0;
+    const mvLabel=mkt==='TW'?'台股市值':'總市值';
+    document.getElementById('ov-mv-label').textContent=mvLabel;
+    document.getElementById('ov-tw').textContent='NT$'+Math.round(mv).toLocaleString();
+    document.getElementById('ov-tws').textContent=`≈ US$${Math.round(mv/fxRate).toLocaleString()}`;
 
-  // 今日損益
-  const todayEl=document.getElementById('ov-today');
-  const todaySubEl=document.getElementById('ov-todays');
-  const hasPrev=(mkt==='TW'&&Object.keys(prevPrices).length)||(mkt==='US'&&Object.keys(prevPricesUS).length)||(mkt==='ALL');
-  if(hasPrev){
-    todayEl.textContent=(tup?'+':'-')+'NT$'+Math.abs(todayPnl).toLocaleString();
-    todayEl.className='mc-v '+(mkt==='US'?(tup?'dn':'up'):(tup?'up':'dn'));
+    const hasPrev=Object.keys(prevPrices).length>0;
+    document.getElementById('ov-today').textContent=hasPrev?(tup?'+':'-')+'NT$'+Math.abs(todayPnl).toLocaleString():'—';
+    document.getElementById('ov-today').className='mc-v '+(tup?'up':'dn');
     const todayPct=mv>0?(todayPnl/(mv-todayPnl)*100):0;
-    todaySubEl.textContent=(tup?'+':'')+todayPct.toFixed(2)+'%';
-    todaySubEl.className=mkt==='US'?(tup?'dn':'up'):(tup?'up':'dn');
-  } else {
-    todayEl.textContent='—'; todayEl.className='mc-v';
-    todaySubEl.textContent='載入中';
-  }
+    document.getElementById('ov-todays').textContent=hasPrev?(tup?'+':'')+todayPct.toFixed(2)+'%':'';
+    document.getElementById('ov-todays').className=tup?'up':'dn';
 
-  document.getElementById('ov-pnl').textContent=(up?'+':'-')+'NT$'+Math.abs(Math.round(pnlAdj)).toLocaleString();
-  document.getElementById('ov-pnl').className='mc-v '+(mkt==='US'?(up?'dn':'up'):(up?'up':'dn'));
-  document.getElementById('ov-pnls').textContent=(up?'+':'')+pp.toFixed(1)+'%';
-  document.getElementById('ov-pnls').className=mkt==='US'?(up?'dn':'up'):(up?'up':'dn');
-  document.getElementById('ov-ret').textContent=(up?'+':'')+pp.toFixed(2)+'%';
-  document.getElementById('ov-ret').className='mc-v '+(mkt==='US'?(up?'dn':'up'):(up?'up':'dn'));
+    document.getElementById('ov-pnl').textContent=(up?'+':'-')+'NT$'+Math.abs(Math.round(pnlAdj)).toLocaleString();
+    document.getElementById('ov-pnl').className='mc-v '+(up?'up':'dn');
+    document.getElementById('ov-pnls').textContent=(up?'+':'')+pp.toFixed(1)+'%';
+    document.getElementById('ov-pnls').className=up?'up':'dn';
+    document.getElementById('ov-ret').textContent=(up?'+':'')+pp.toFixed(2)+'%';
+    document.getElementById('ov-ret').className='mc-v '+(up?'up':'dn');
+  }
   renderPnlTable();
 }
 
