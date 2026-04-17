@@ -1808,6 +1808,19 @@ async function patchHistoryFees(){
   const res=await gas({action:'read',sheet:'trades'});
   if(!res.ok||res.data.length<2){st.textContent='讀取失敗';st.className='status err';return;}
   pb.style.width='30%';
+  // debug：顯示第一筆 trades 日期的原始值
+  const _d0=res.data[1]?res.data[1][0]:'N/A';
+  console.log('[patch] 第一筆日期原始值:', _d0, typeof _d0, _d0 instanceof Date);
+  const _d0s=_d0 instanceof Date?_d0.toISOString():String(_d0);
+  console.log('[patch] 第一筆日期字串:', _d0s);
+  // 試算時區修正
+  if(_d0s.includes('T')){
+    const _taipei=new Date(new Date(_d0s).getTime()+8*3600*1000);
+    console.log('[patch] +8h後:', _taipei.toISOString().slice(0,10));
+  }
+  // 顯示 XLS key 樣本
+  const _xlsKeys=Object.keys(xlsMap).slice(0,3);
+  console.log('[patch] XLS key 樣本:', _xlsKeys);
 
   const hdr=res.data[0].map(h=>String(h).trim());
   // 確保 header 有 trade_type, fee, tax
@@ -1842,9 +1855,9 @@ async function patchHistoryFees(){
         date=s.replace(/\//g,'-').slice(0,10);
       }
     }
-    const code=String(row[cdCol]).padStart(4,'0');
+    const code=String(row[cdCol]).trim().padStart(4,'0');
     const side=String(row[sdCol]||'').trim();
-    const qty=+row[qtCol]||0;
+    const qty=parseInt(String(row[qtCol]).replace(/,/g,''))||0;
     const key=`${date}|${code}|${side}|${qty}`;
 
     if(xlsMap[key]){
@@ -1874,7 +1887,7 @@ async function patchHistoryFees(){
   const res2=await gas({action:'write',sheet:'trades',rows:[hdr,...newData]});
   pb.style.width='100%';
   if(res2.ok){
-    st.textContent=`✓ 完成！XLS 對應 ${matched} 筆，code 猜測 ${guessed} 筆`;
+    st.textContent=`✓ 完成！XLS 對應 ${matched} 筆，code 猜測 ${guessed} 筆（共 ${newData.length} 筆）`;
     st.className='status ok';
     clearPatch();
     calcTradeFees(); // 重新計算費用
