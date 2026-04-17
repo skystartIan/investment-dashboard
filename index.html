@@ -769,14 +769,20 @@ async function loadUSStockData() {
   try {
     const res = await gas({action:'read', sheet:'holdings'});
     if (!res.ok) return;
-    usStockData = res.data.slice(1).filter(r=>r[0]&&String(r[1]).trim()==='US').map(r=>({
-      code:  String(r[0]).trim(),
-      mkt:   'US',
-      sh:    +r[2],
-      avg:   +r[3],
-      price: +r[4],
-      name:  r[5]||r[0]
-    }));
+    const hdr = res.data[0].map(h=>String(h).trim());
+    const tiCol=0, mktCol=1, shCol=2, avCol=3, prCol=4, nmCol=5;
+    const ibPnlCol = hdr.indexOf('ib_pnl');
+    usStockData = res.data.slice(1)
+      .filter(r=>r[0]&&String(r[mktCol]).trim()==='US')
+      .map(r=>({
+        code:   String(r[tiCol]).trim(),
+        mkt:    'US',
+        sh:     +r[shCol],
+        avg:    +r[avCol],
+        price:  +r[prCol],
+        name:   String(r[nmCol]||r[tiCol]).trim(),
+        ibPnl:  ibPnlCol>=0 ? (+r[ibPnlCol]||0) : null // IB 未實現損益 USD
+      }));
     // 背景抓即時價
     loadUSRealtimePrices();
   } catch(_) {}
@@ -958,7 +964,9 @@ function renderOverview(){
       mv+=usMv; cost+=usCost;
       const prev=prevPricesUS[s.code];
       if(prev&&prev>0) todayPnl+=Math.round((s.price-prev)*s.sh*fxRate);
-      pnlAdj+=usMv-usCost;
+      // 用 ib_pnl（IB 計算的未實現損益）若有的話
+      if(s.ibPnl!==null&&s.ibPnl!==undefined) pnlAdj+=s.ibPnl*fxRate;
+      else pnlAdj+=usMv-usCost;
     });
   }
 
@@ -1052,33 +1060,54 @@ function renderPnlTable(){
     // 52週高低點
     const w52=render52WeekBar(s.code, s.price);
 
+    // 金額顯示：台股用 TWD，美股用 USD，整體用 TWD
+    const showUSD = isUS && mkt !== 'ALL';
+    const gainStr  = showUSD
+      ? `${gup?'+':'−'}$${Math.abs((s.ibPnl??gain/fxRate)).toLocaleString('en',{maximumFractionDigits:0})}`
+      : `${gup?'+':'−'}NT$${Math.abs(gain).toLocaleString()}`;
+    const mvStr = showUSD
+      ? `$${Math.round(s.sh*s.price).toLocaleString('en',{maximumFractionDigits:0})}`
+      : `NT$${mvTWD.toLocaleString()}`;
+    const todayStr = showUSD && todayGain!==null
+      ? `${tup?'+':'−'}$${Math.abs(Math.round((s.price-(prevPricesUS[s.code]||s.price))*s.sh)).toLocaleString('en',{maximumFractionDigits:0})}`
+      : todayGain===null?'—':`${tup?'+':'−'}NT$${Math.abs(todayGain).toLocaleString()}`;
+
+    // 52週重設計：文字形式
+    const w52text = (()=>{
+      const d=week52Data[s.code];
+      if(!d||!d.high||!d.low) return '';
+      const pct=Math.min(100,Math.max(0,(s.price-d.low)/(d.high-d.low)*100));
+      const pos=Math.round(pct/10); // 0-10
+      const bar='─'.repeat(pos)+'●'+'─'.repeat(10-pos);
+      return `<div style="font-size:11px;color:var(--t3);font-family:var(--mono);margin-top:4px">
+        ▼${d.low.toFixed(0)} ${bar} ▲${d.high.toFixed(0)}
+      </div>`;
+    })();
+
     return`<div style="padding:14px 0;border-bottom:1px solid var(--b);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
       <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:4px">
-          <span style="font-size:18px;font-weight:700;color:var(--t)">${s.name}</span>
-          <span style="font-size:13px;color:var(--t2);font-family:var(--mono)">${s.code}</span>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:3px">
+          <span style="font-size:20px;font-weight:700;color:var(--t);font-family:var(--mono)">${s.code}</span>
           ${isUS?'<span style="font-size:10px;background:var(--surf2);border:1px solid var(--b2);border-radius:3px;padding:1px 5px;color:var(--t3)">US</span>':''}
         </div>
-        <div style="font-size:14px;color:var(--t2);font-family:var(--mono)">
-          ${sharesStr}股 · 均${fmtPrice(s.avg)}→<span style="color:var(--t);font-weight:600">${fmtPrice(s.price)}</span>${priceUnit?` <span style="font-size:11px;color:var(--t3)">${priceUnit}</span>`:''}
+        <div style="font-size:13px;color:var(--t2);margin-bottom:3px">${s.name}</div>
+        <div style="font-size:13px;color:var(--t2);font-family:var(--mono)">
+          ${sharesStr}股 · 均${fmtPrice(s.avg)}→<span style="color:var(--t);font-weight:600">${fmtPrice(s.price)}</span>${isUS?' USD':''}
         </div>
         <div style="font-size:14px;margin-top:3px">
           <span style="color:${gColor};font-weight:600">${gup?'+':''}${gainPct.toFixed(2)}%</span>
-          <span style="color:${gColor};margin-left:6px">${gup?'+':'−'}NT$${Math.abs(gain).toLocaleString()}</span>
+          <span style="color:${gColor};margin-left:6px">${gainStr}</span>
         </div>
-        ${w52?`<div style="margin-top:6px">${w52}</div>`:''}
+        ${w52text}
       </div>
       <div style="text-align:right;flex-shrink:0">
         <div style="font-size:22px;font-weight:700;color:${tColor};font-family:var(--mono)">
-          ${todayGain===null?'—':(tup?'+':'−')+'NT$'+Math.abs(todayGain).toLocaleString()}
+          ${todayStr}
         </div>
         <div style="font-size:15px;font-weight:600;color:${tColor};margin-top:2px">
           ${todayPct===null?'—':(tup?'▲':'▼')+Math.abs(todayPct).toFixed(2)+'%'}
         </div>
-        <div style="font-size:12px;color:var(--t2);margin-top:2px">
-          NT$${mvTWD.toLocaleString()}
-        </div>
-        ${mvSub?`<div style="font-size:11px;color:var(--t3)">${mvSub}</div>`:''}
+        <div style="font-size:12px;color:var(--t2);margin-top:2px">${mvStr}</div>
       </div>
     </div>`;
   }).join('');
