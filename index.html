@@ -199,6 +199,14 @@ table.div-tbl tr:hover td{background:var(--surf2)}
 .snap-item:last-child{border-bottom:none}
 .snap-date{font-family:var(--mono);font-size:12px;color:var(--t3)}
 .snap-val{font-family:var(--mono);font-size:13px;color:var(--t)}
+.mkt-tab{background:var(--surf2);border:1px solid var(--b2);border-right:none;color:var(--t2);padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font);transition:all .2s}
+.mkt-tab:first-child{border-radius:var(--r-sm) 0 0 var(--r-sm)}
+.mkt-tab:last-child{border-radius:0 var(--r-sm) var(--r-sm) 0;border-right:1px solid var(--b2)}
+.mkt-tab.on{background:var(--gbg);border-color:var(--green);color:var(--green)}
+.week52-bar{margin-top:4px;height:4px;background:var(--surf2);border-radius:2px;position:relative;overflow:visible}
+.week52-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--dn),var(--up))}
+.week52-dot{position:absolute;top:-3px;width:10px;height:10px;border-radius:50%;background:var(--t);border:2px solid var(--surf);transform:translateX(-50%)}
+.week52-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--t3);font-family:var(--mono);margin-top:2px}
 .loading{text-align:center;padding:32px;color:var(--t3);font-size:13px}
 </style>
 </head>
@@ -210,10 +218,21 @@ table.div-tbl tr:hover td{background:var(--surf2)}
     <div class="header-date" id="hdate"></div>
   </div>
   <div class="header-right">
+    <div id="fx-rate-display" style="font-size:12px;color:var(--t2);font-family:var(--mono);display:flex;align-items:center;gap:4px">
+      <span style="color:var(--t3)">USD/TWD</span>
+      <span id="fx-rate-val" style="color:var(--t);font-weight:600">—</span>
+    </div>
     <span class="theme-label" id="tlabel">暗色</span>
     <div class="theme-toggle" onclick="toggleTheme()"></div>
     <button class="hbtn" onclick="manualDailyUpdate()" title="抓取今日最新收盤價並更新總覽">↻ 更新</button>
   </div>
+</div>
+
+<!-- 市場切換 -->
+<div style="display:flex;gap:0;padding:8px 16px 0;justify-content:center">
+  <button class="mkt-tab on" id="mkt-tw" onclick="setMarket('TW')">🇹🇼 台股</button>
+  <button class="mkt-tab" id="mkt-us" onclick="setMarket('US')">🇺🇸 美股</button>
+  <button class="mkt-tab" id="mkt-all" onclick="setMarket('ALL')">🌐 整體</button>
 </div>
 
 <div class="nav">
@@ -613,9 +632,14 @@ const NEXT_DIV_FALLBACK=[
 const FREQ_LABEL={Q:'季配',H:'半年配',A:'年配'};
 const FREQ_TIMES={Q:4,H:2,A:1};
 
-let stockData=[], lendData=[];
+let stockData=[], lendData=[], usStockData=[];
 // 個股歷史費用（賣出手續費 + 交易稅），從 trades 計算，用於對齊元大損益
 let tradeFees={}; // {code: totalFee}
+let currentMarket='TW'; // TW / US / ALL
+let fxRate=32.5; // USD/TWD 動態匯率
+let week52Data={}; // {code: {high, low}}
+let realtimePrices={}; // 美股即時價格 {ticker: {price, prevClose}}
+let prevPricesUS={}; // 美股昨收
 let lineChart=null, pieChart=null;
 let dailyPortfolio=[], twiiDaily=[], currentRange=0, showTWII=false;
 let chartRows=[];
@@ -691,6 +715,104 @@ async function fetchTWSEYesterdayClose(){
 }
 
 // 從 trades 計算個股歷史費用（賣出手續費 + 交易稅），背景執行不卡畫面
+
+// ── 市場切換 ──
+function setMarket(mkt) {
+  currentMarket = mkt;
+  ['TW','US','ALL'].forEach(function(m) {
+    document.getElementById('mkt-'+m.toLowerCase()).classList.toggle('on', m===mkt);
+  });
+  renderOverview();
+}
+
+// ── 動態匯率 ──
+async function loadFxRate() {
+  try {
+    const res = await gas({action:'get_fx_rate'});
+    if (res.ok && res.rate) {
+      fxRate = res.rate;
+      document.getElementById('fx-rate-val').textContent = res.rate.toFixed(2);
+    }
+  } catch(_) {}
+}
+
+// ── 美股即時現價（背景非同步）──
+async function loadUSRealtimePrices() {
+  if (!usStockData.length) return;
+  try {
+    const tickers = usStockData.map(s => s.code);
+    const res = await gas({action:'get_realtime_prices', codes:tickers, market:'US'});
+    if (!res.ok || !res.data) return;
+    realtimePrices = res.data;
+    // 更新 usStockData 的現價和昨收
+    usStockData.forEach(s => {
+      if (realtimePrices[s.code]) {
+        prevPricesUS[s.code] = realtimePrices[s.code].prevClose;
+        s.price = realtimePrices[s.code].price;
+        // 更新52週高低
+        if (realtimePrices[s.code].high52) {
+          week52Data[s.code] = {
+            high: realtimePrices[s.code].high52,
+            low:  realtimePrices[s.code].low52
+          };
+        }
+      }
+    });
+    if (currentMarket === 'US' || currentMarket === 'ALL') {
+      renderOverview();
+    }
+  } catch(_) {}
+}
+
+// ── 讀取美股資料 ──
+async function loadUSStockData() {
+  try {
+    const res = await gas({action:'read', sheet:'holdings'});
+    if (!res.ok) return;
+    usStockData = res.data.slice(1).filter(r=>r[0]&&String(r[1]).trim()==='US').map(r=>({
+      code:  String(r[0]).trim(),
+      mkt:   'US',
+      sh:    +r[2],
+      avg:   +r[3],
+      price: +r[4],
+      name:  r[5]||r[0]
+    }));
+    // 背景抓即時價
+    loadUSRealtimePrices();
+  } catch(_) {}
+}
+
+// 美股顏色（綠漲紅跌）
+function usColor(val) { return val >= 0 ? 'var(--dn)' : 'var(--up)'; }
+function twColor(val) { return val >= 0 ? 'var(--up)' : 'var(--dn)'; }
+function mktColor(val, mkt) { return mkt==='US' ? usColor(val) : twColor(val); }
+
+// 美股今日漲跌
+function dayChgUS(s) {
+  const p = prevPricesUS[s.code];
+  return p && p > 0 ? (s.price - p) / p * 100 : null;
+}
+function dayGainUS(s) {
+  const p = prevPricesUS[s.code];
+  return p && p > 0 ? Math.round((s.price - p) * s.sh) : null;
+}
+
+// 52週高低點 bar
+function render52WeekBar(code, price) {
+  const d = week52Data[code];
+  if (!d || !d.high || !d.low || d.high <= d.low) return '';
+  const pct = Math.min(100, Math.max(0, (price - d.low) / (d.high - d.low) * 100));
+  return `<div class="week52-bar">
+    <div class="week52-fill" style="width:100%"></div>
+    <div class="week52-dot" style="left:${pct}%"></div>
+  </div>
+  <div class="week52-labels">
+    <span>${d.low.toFixed(0)}</span>
+    <span style="color:var(--t3);font-size:8px">52W</span>
+    <span>${d.high.toFixed(0)}</span>
+  </div>`;
+}
+
 // 定期定額標的（0050/0056/2330）：手續費1元、免交易稅（無 trade_type 時用 code 猜）
 const DCA_CODES=new Set(['0050','0056','2330']);
 const FEE_RATE=0.001425*0.6; // 手續費6折
@@ -815,89 +937,137 @@ function setSortMode(mode,btn){
 }
 
 function renderOverview(){
-  let twV=0,twC=0,todayPnl=0;
-  stockData.forEach(s=>{
-    if(s.mkt==='TW'){
-      twV+=s.sh*s.price;
-      twC+=s.sh*s.avg;
+  const mkt = currentMarket;
+  let mv=0, cost=0, todayPnl=0, pnlAdj=0;
+  const upColorFn = mkt==='US' ? usColor : twColor;
+
+  if(mkt==='TW'||mkt==='ALL'){
+    stockData.forEach(s=>{
+      if(s.mkt!=='TW') return;
+      mv+=s.sh*s.price; cost+=s.sh*s.avg;
       const prev=prevPrices[s.code];
       if(prev&&prev>0) todayPnl+=Math.round((s.price-prev)*s.sh);
-    }
-  });
-  const totalSellFees=Object.values(tradeFees).reduce((s,v)=>s+v,0);
-  const pnl=twV-twC-totalSellFees,pp=twC>0?pnl/twC*100:0,up=pnl>=0;
+    });
+    const sellFees=Object.values(tradeFees).reduce((a,v)=>a+v,0);
+    pnlAdj=mv-cost-sellFees;
+  }
+  if(mkt==='US'||mkt==='ALL'){
+    usStockData.forEach(s=>{
+      const usMv=s.sh*s.price*fxRate;
+      const usCost=s.sh*s.avg*fxRate;
+      mv+=usMv; cost+=usCost;
+      const prev=prevPricesUS[s.code];
+      if(prev&&prev>0) todayPnl+=Math.round((s.price-prev)*s.sh*fxRate);
+      pnlAdj+=usMv-usCost;
+    });
+  }
+
+  const pp=cost>0?pnlAdj/cost*100:0, up=pnlAdj>=0;
   const tup=todayPnl>=0;
 
-  document.getElementById('ov-tw').textContent='NT$'+Math.round(twV).toLocaleString();
-  document.getElementById('ov-tws').textContent='≈ US$'+Math.round(twV/FX).toLocaleString();
+  // 市值卡片
+  const mvLabel = mkt==='TW'?'台股市值':mkt==='US'?'美股市值':'總市值';
+  document.querySelector('#panel-overview .mc:first-child .mc-l').textContent=mvLabel;
+  document.getElementById('ov-tw').textContent='NT$'+Math.round(mv).toLocaleString();
+  document.getElementById('ov-tws').textContent=
+    mkt==='US'?`USD ${Math.round(mv/fxRate).toLocaleString()}`:
+    mkt==='TW'?`≈ US$${Math.round(mv/fxRate).toLocaleString()}`:
+    `≈ US$${Math.round(mv/fxRate).toLocaleString()}`;
 
   // 今日損益
   const todayEl=document.getElementById('ov-today');
   const todaySubEl=document.getElementById('ov-todays');
-  if(Object.keys(prevPrices).length){
+  const hasPrev=(mkt==='TW'&&Object.keys(prevPrices).length)||(mkt==='US'&&Object.keys(prevPricesUS).length)||(mkt==='ALL');
+  if(hasPrev){
     todayEl.textContent=(tup?'+':'-')+'NT$'+Math.abs(todayPnl).toLocaleString();
-    todayEl.className='mc-v '+(tup?'up':'dn');
-    const todayPct=twV>0?(todayPnl/(twV-todayPnl)*100):0;
+    todayEl.className='mc-v '+(mkt==='US'?(tup?'dn':'up'):(tup?'up':'dn'));
+    const todayPct=mv>0?(todayPnl/(mv-todayPnl)*100):0;
     todaySubEl.textContent=(tup?'+':'')+todayPct.toFixed(2)+'%';
-    todaySubEl.className=tup?'up':'dn';
+    todaySubEl.className=mkt==='US'?(tup?'dn':'up'):(tup?'up':'dn');
   } else {
-    todayEl.textContent='—';
-    todayEl.className='mc-v';
-    todaySubEl.textContent='昨收載入中';
+    todayEl.textContent='—'; todayEl.className='mc-v';
+    todaySubEl.textContent='載入中';
   }
 
-  document.getElementById('ov-pnl').textContent=(up?'+':'-')+'NT$'+Math.abs(Math.round(pnl)).toLocaleString();
-  document.getElementById('ov-pnl').className='mc-v '+(up?'up':'dn');
+  document.getElementById('ov-pnl').textContent=(up?'+':'-')+'NT$'+Math.abs(Math.round(pnlAdj)).toLocaleString();
+  document.getElementById('ov-pnl').className='mc-v '+(mkt==='US'?(up?'dn':'up'):(up?'up':'dn'));
   document.getElementById('ov-pnls').textContent=(up?'+':'')+pp.toFixed(1)+'%';
-  document.getElementById('ov-pnls').className=up?'up':'dn';
+  document.getElementById('ov-pnls').className=mkt==='US'?(up?'dn':'up'):(up?'up':'dn');
   document.getElementById('ov-ret').textContent=(up?'+':'')+pp.toFixed(2)+'%';
-  document.getElementById('ov-ret').className='mc-v '+(up?'up':'dn');
+  document.getElementById('ov-ret').className='mc-v '+(mkt==='US'?(up?'dn':'up'):(up?'up':'dn'));
   renderPnlTable();
 }
 
 function renderPnlTable(){
-  const tw=stockData.filter(s=>s.mkt==='TW');
-  let sorted=[...tw];
+  const mkt=currentMarket;
+  let allStocks=[];
+  if(mkt==='TW'||mkt==='ALL') allStocks.push(...stockData.filter(s=>s.mkt==='TW'));
+  if(mkt==='US'||mkt==='ALL') allStocks.push(...usStockData);
+
+  let sorted=[...allStocks];
   const dir=sortDir==='asc'?1:-1;
-  const todayAmt=s=>{const p=prevPrices[s.code];return p&&p>0?(s.price-p)*s.sh:null;};
-  if(sortMode==='today') sorted.sort((a,b)=>{const ca=todayAmt(a)??(-Infinity*dir),cb=todayAmt(b)??(-Infinity*dir);return dir*(ca-cb);});
+  const todayAmtFn=s=>{
+    if(s.mkt==='US'){const g=dayGainUS(s);return g!==null?g:null;}
+    const p=prevPrices[s.code];return p&&p>0?(s.price-p)*s.sh:null;
+  };
+  if(sortMode==='today') sorted.sort((a,b)=>{const ca=todayAmtFn(a)??(-Infinity*dir),cb=todayAmtFn(b)??(-Infinity*dir);return dir*(ca-cb);});
   else if(sortMode==='pct') sorted.sort((a,b)=>dir*(pct(a)-pct(b)));
   else if(sortMode==='gain') sorted.sort((a,b)=>dir*((a.price-a.avg)*a.sh-(b.price-b.avg)*b.sh));
   else if(sortMode==='mv') sorted.sort((a,b)=>dir*(a.sh*a.price-b.sh*b.price));
 
   document.getElementById('pnl-list').innerHTML=sorted.map(s=>{
-    const fee=tradeFees[s.code]||0;
-    const gain=Math.round((s.price-s.avg)*s.sh-fee);
-    const gainPct=s.avg*s.sh>0?gain/(s.avg*s.sh)*100:0;
+    const isUS=s.mkt==='US';
+    const fee=isUS?0:tradeFees[s.code]||0;
+    const gain=Math.round((s.price-s.avg)*s.sh*(isUS?fxRate:1)-fee);
+    const gainPct=s.avg*s.sh>0?gain/(s.avg*s.sh*(isUS?fxRate:1))*100:0;
     const gup=gain>=0;
 
-    const prev=prevPrices[s.code];
-    const todayGain=prev&&prev>0?Math.round((s.price-prev)*s.sh):null;
-    const todayPct=prev&&prev>0?(s.price-prev)/prev*100:null;
-    const tup=todayGain===null?null:todayGain>=0;
+    let todayGain, todayPct, tup;
+    if(isUS){
+      todayGain=dayGainUS(s); // TWD
+      const chg=dayChgUS(s);
+      todayPct=chg;
+      tup=todayGain===null?null:todayGain>=0;
+    } else {
+      const prev=prevPrices[s.code];
+      todayGain=prev&&prev>0?Math.round((s.price-prev)*s.sh):null;
+      todayPct=prev&&prev>0?(s.price-prev)/prev*100:null;
+      tup=todayGain===null?null:todayGain>=0;
+    }
 
-    // 台股：紅漲綠跌
-    const upColor='var(--up)';   // 紅
-    const dnColor='var(--dn)';   // 綠
-    const tColor=tup===null?'var(--t2)':tup?upColor:dnColor;
-    const gColor=gup?upColor:dnColor;
+    // 顏色：台股紅漲綠跌，美股綠漲紅跌
+    const posColor=isUS?'var(--dn)':'var(--up)';
+    const negColor=isUS?'var(--up)':'var(--dn)';
+    const tColor=tup===null?'var(--t2)':tup?posColor:negColor;
+    const gColor=gup?posColor:negColor;
 
-    return`<div style="padding:14px 0;border-bottom:1px solid var(--b);display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <!-- 左：標的 + 次要資訊 -->
+    // 市值顯示
+    const mvTWD=Math.round(s.sh*s.price*(isUS?fxRate:1));
+    const mvSub=isUS?`USD ${Math.round(s.sh*s.price).toLocaleString()}`:'';
+
+    // 均價/現價顯示
+    const priceUnit=isUS?'USD':'';
+    const sharesStr=isUS&&s.sh%1!==0?s.sh.toFixed(4):s.sh.toLocaleString();
+
+    // 52週高低點
+    const w52=render52WeekBar(s.code, s.price);
+
+    return`<div style="padding:14px 0;border-bottom:1px solid var(--b);display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:4px">
           <span style="font-size:18px;font-weight:700;color:var(--t)">${s.name}</span>
           <span style="font-size:13px;color:var(--t2);font-family:var(--mono)">${s.code}</span>
+          ${isUS?'<span style="font-size:10px;background:var(--surf2);border:1px solid var(--b2);border-radius:3px;padding:1px 5px;color:var(--t3)">US</span>':''}
         </div>
         <div style="font-size:14px;color:var(--t2);font-family:var(--mono)">
-          ${s.sh.toLocaleString()}股 · 均${fmtPrice(s.avg)}→<span style="color:var(--t);font-weight:600">${fmtPrice(s.price)}</span>
+          ${sharesStr}股 · 均${fmtPrice(s.avg)}→<span style="color:var(--t);font-weight:600">${fmtPrice(s.price)}</span>${priceUnit?` <span style="font-size:11px;color:var(--t3)">${priceUnit}</span>`:''}
         </div>
         <div style="font-size:14px;margin-top:3px">
           <span style="color:${gColor};font-weight:600">${gup?'+':''}${gainPct.toFixed(2)}%</span>
           <span style="color:${gColor};margin-left:6px">${gup?'+':'−'}NT$${Math.abs(gain).toLocaleString()}</span>
         </div>
+        ${w52?`<div style="margin-top:6px">${w52}</div>`:''}
       </div>
-      <!-- 右：今日損益（大字） -->
       <div style="text-align:right;flex-shrink:0">
         <div style="font-size:22px;font-weight:700;color:${tColor};font-family:var(--mono)">
           ${todayGain===null?'—':(tup?'+':'−')+'NT$'+Math.abs(todayGain).toLocaleString()}
@@ -906,8 +1076,9 @@ function renderPnlTable(){
           ${todayPct===null?'—':(tup?'▲':'▼')+Math.abs(todayPct).toFixed(2)+'%'}
         </div>
         <div style="font-size:12px;color:var(--t2);margin-top:2px">
-          市值 ${Math.round(s.sh*s.price).toLocaleString()}
+          NT$${mvTWD.toLocaleString()}
         </div>
+        ${mvSub?`<div style="font-size:11px;color:var(--t3)">${mvSub}</div>`:''}
       </div>
     </div>`;
   }).join('');
@@ -2018,12 +2189,17 @@ async function doSnap(){
 
 // ── Init ──
 async function init(){
-  await refresh();
-  try{
-    const res=await gas({action:'read',sheet:'lending'});
+  // 並行載入：匯率 + 台股 + 美股
+  await Promise.all([
+    loadFxRate(),
+    refresh(),
+    loadUSStockData()
+  ]);
+  // 背景載入借貸資料
+  gas({action:'read',sheet:'lending'}).then(res=>{
     if(res.ok&&res.data.length>1)
       lendData=res.data.slice(1).filter(r=>r[0]).map(r=>({code:String(r[0]),name:r[1],shares:+r[2],date:r[3],rate:r[4],income:+r[5]||0}));
-  }catch(_){}
+  }).catch(_=>{});
 }
 init();
 </script>
