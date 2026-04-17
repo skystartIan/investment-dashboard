@@ -1808,19 +1808,26 @@ async function patchHistoryFees(){
   const res=await gas({action:'read',sheet:'trades'});
   if(!res.ok||res.data.length<2){st.textContent='讀取失敗';st.className='status err';return;}
   pb.style.width='30%';
-  // debug：顯示第一筆 trades 日期的原始值
-  const _d0=res.data[1]?res.data[1][0]:'N/A';
-  console.log('[patch] 第一筆日期原始值:', _d0, typeof _d0, _d0 instanceof Date);
-  const _d0s=_d0 instanceof Date?_d0.toISOString():String(_d0);
-  console.log('[patch] 第一筆日期字串:', _d0s);
-  // 試算時區修正
-  if(_d0s.includes('T')){
-    const _taipei=new Date(new Date(_d0s).getTime()+8*3600*1000);
-    console.log('[patch] +8h後:', _taipei.toISOString().slice(0,10));
+  // debug：顯示第一筆 trades 的 key 比對
+  const _hdr=hdr;
+  const _cdCol=_hdr.indexOf('code'),_sdCol=_hdr.indexOf('side'),_qtCol=_hdr.indexOf('qty'),_dtCol=_hdr.indexOf('date');
+  const _r1=res.data[1];
+  if(_r1){
+    const _date1=String(_r1[_dtCol]).slice(0,10);
+    const _code1=String(_r1[_cdCol]).trim().padStart(4,'0');
+    const _side1=String(_r1[_sdCol]||'').trim();
+    const _qty1=parseInt(String(_r1[_qtCol]).replace(/,/g,''))||0;
+    const _key1=`${_date1}|${_code1}|${_side1}|${_qty1}`;
+    console.log('[patch] trades 第一筆 key:', JSON.stringify(_key1));
+    console.log('[patch] trades 第一筆 key 在 xlsMap？', !!xlsMap[_key1]);
+    console.log('[patch] xlsMap 第一筆:', Object.keys(xlsMap)[0]);
+    // 找第一筆匹配的
+    let foundKey=null;
+    for(const k of Object.keys(xlsMap)){
+      if(xlsMap[k]) {foundKey=k;break;}
+    }
+    console.log('[patch] xlsMap 樣本key:', foundKey, '→', JSON.stringify(xlsMap[foundKey]));
   }
-  // 顯示 XLS key 樣本
-  const _xlsKeys=Object.keys(xlsMap).slice(0,3);
-  console.log('[patch] XLS key 樣本:', _xlsKeys);
 
   const hdr=res.data[0].map(h=>String(h).trim());
   // 確保 header 有 trade_type, fee, tax
