@@ -1824,7 +1824,24 @@ async function patchHistoryFees(){
     // 補齊長度
     while(row.length<hdr.length) row.push('');
     if(!row[cdCol]) return row;
-    const date=(row[dtCol] instanceof Date?row[dtCol].toISOString():String(row[dtCol])).slice(0,10);
+    // 日期：GAS 存的可能是 UTC 時間，台北時間比 UTC 快 8 小時
+    // 所以 "2026-04-16T16:00:00Z" 在台北是 2026-04-17
+    let dateRaw2=row[dtCol] instanceof Date ? row[dtCol] : null;
+    let date;
+    if(dateRaw2){
+      // Date 物件加8小時轉台北時間
+      const taipei=new Date(dateRaw2.getTime()+8*3600*1000);
+      date=taipei.toISOString().slice(0,10);
+    } else {
+      const s=String(row[dtCol]).trim();
+      if(s.includes('T')){
+        // ISO 字串含時間，加8小時
+        const taipei=new Date(new Date(s).getTime()+8*3600*1000);
+        date=taipei.toISOString().slice(0,10);
+      } else {
+        date=s.replace(/\//g,'-').slice(0,10);
+      }
+    }
     const code=String(row[cdCol]).padStart(4,'0');
     const side=String(row[sdCol]||'').trim();
     const qty=+row[qtCol]||0;
