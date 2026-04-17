@@ -253,10 +253,9 @@ table.div-tbl tr:hover td{background:var(--surf2)}
     <div class="mc"><div class="mc-l">未實現損益</div><div class="mc-v" id="ov-pnl">—</div><div class="mc-s" id="ov-pnls"></div></div>
     <div class="mc"><div class="mc-l">報酬率</div><div class="mc-v" id="ov-ret">—</div><div class="mc-s" style="color:var(--t2)">整體</div></div>
   </div>
-  <!-- 美股：5張卡片 -->
+  <!-- 美股：4張卡片 -->
   <div class="metrics" id="metrics-us" style="display:none">
-    <div class="mc"><div class="mc-l">NAV</div><div class="mc-v" id="ov-us-nav">—</div><div class="mc-s" id="ov-us-navs"></div></div>
-    <div class="mc"><div class="mc-l">現金</div><div class="mc-v" id="ov-us-cash">—</div><div class="mc-s" style="color:var(--t2)">USD（含融資）</div></div>
+    <div class="mc"><div class="mc-l">淨資產值(NAV)</div><div class="mc-v" id="ov-us-nav">—</div><div class="mc-s" id="ov-us-navs"></div></div>
     <div class="mc"><div class="mc-l">今日損益</div><div class="mc-v" id="ov-us-today">—</div><div class="mc-s" id="ov-us-todays"></div></div>
     <div class="mc"><div class="mc-l">未實現損益</div><div class="mc-v" id="ov-us-pnl">—</div><div class="mc-s" id="ov-us-pnls"></div></div>
     <div class="mc"><div class="mc-l">報酬率</div><div class="mc-v" id="ov-us-ret">—</div><div class="mc-s" style="color:var(--t2)">整體</div></div>
@@ -982,13 +981,10 @@ function renderOverview(){
     const pp=usCost>0?usPnl/usCost*100:0;
     const up=usPnl>=0, tup=usTodayPnl>=0, cup=ibCashUSD>=0;
 
-    // NAV
+    // NAV（大字USD，小字NT$·現金）
     document.getElementById('ov-us-nav').textContent=`USD ${Math.round(navUSD).toLocaleString()}`;
-    document.getElementById('ov-us-navs').textContent=`NT$${Math.round(navUSD*fxRate).toLocaleString()}`;
-
-    // 現金
-    document.getElementById('ov-us-cash').textContent=(cup?'+':'')+'$'+Math.round(ibCashUSD).toLocaleString();
-    document.getElementById('ov-us-cash').className='mc-v '+(cup?'dn':'up'); // 美股：綠正紅負
+    const cashStr=ibCashUSD!==0?` · 現金 ${ibCashUSD<0?'-':'+'}$${Math.abs(Math.round(ibCashUSD)).toLocaleString()}`:'';
+    document.getElementById('ov-us-navs').textContent=`NT$${Math.round(navUSD*fxRate).toLocaleString()}${cashStr}`;
 
     // 今日損益
     const hasPrevUS=Object.keys(prevPricesUS).length>0;
