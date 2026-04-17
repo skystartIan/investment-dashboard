@@ -207,6 +207,9 @@ table.div-tbl tr:hover td{background:var(--surf2)}
 .week52-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--dn),var(--up))}
 .week52-dot{position:absolute;top:-3px;width:10px;height:10px;border-radius:50%;background:var(--t);border:2px solid var(--surf);transform:translateX(-50%)}
 .week52-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--t3);font-family:var(--mono);margin-top:2px}
+/* 持倉頁美股 tab */
+#h-tab-us.on{background:rgba(77,159,255,0.12);color:var(--blue)!important}
+#h-tab-tw.on{background:var(--gbg);color:var(--green)!important}
 .loading{text-align:center;padding:32px;color:var(--t3);font-size:13px}
 </style>
 </head>
@@ -287,24 +290,69 @@ table.div-tbl tr:hover td{background:var(--surf2)}
 
 <!-- 持倉 -->
 <div class="panel" id="panel-holdings">
-  <div class="card">
-    <div class="card-title">市值配置（hover 查看明細）</div>
-    <div class="pie-outer">
-      <div class="pie-canvas-wrap">
-        <canvas id="pieC" width="220" height="220"></canvas>
-        <div class="pie-center">
-          <div class="pie-center-val" id="pie-total">—</div>
-          <div class="pie-center-lbl">總市值</div>
-        </div>
+  <!-- 持倉市場切換 -->
+  <div style="display:flex;gap:0;margin-bottom:14px;border-radius:var(--r-sm);overflow:hidden;border:1px solid var(--b2);align-self:flex-start">
+    <button class="trade-side buy on" id="h-tab-tw" onclick="setHoldingsTab('TW')" style="font-size:13px;padding:8px 20px">🇹🇼 台股</button>
+    <button class="trade-side sell" id="h-tab-us" onclick="setHoldingsTab('US')" style="font-size:13px;padding:8px 20px;color:var(--t3)">🇺🇸 美股</button>
+  </div>
+
+  <!-- 台股持倉 -->
+  <div id="h-section-tw">
+    <div class="card">
+      <div class="card-title">
+        <span>台股市值配置</span>
+        <span style="font-size:12px;color:var(--t3);font-family:var(--mono)" id="pie-tw-sub"></span>
       </div>
-      <div class="pie-rank" id="pie-rank"></div>
+      <div class="pie-outer">
+        <div class="pie-canvas-wrap">
+          <canvas id="pieC" width="220" height="220"></canvas>
+          <div class="pie-center">
+            <div class="pie-center-val" id="pie-total">—</div>
+            <div class="pie-center-lbl">總市值</div>
+          </div>
+        </div>
+        <div class="pie-rank" id="pie-rank"></div>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="base-tbl">
+        <thead><tr><th>代號</th><th>名稱</th><th>股數</th><th>均價</th><th>現價</th><th>損益%</th><th>市值</th></tr></thead>
+        <tbody id="h-body"><tr><td colspan="7" class="loading">載入中...</td></tr></tbody>
+      </table>
     </div>
   </div>
-  <div class="tbl-wrap">
-    <table class="base-tbl">
-      <thead><tr><th>代號</th><th>名稱</th><th>股數</th><th>均價</th><th>現價</th><th>損益%</th><th>市值</th></tr></thead>
-      <tbody id="h-body"><tr><td colspan="7" class="loading">載入中...</td></tr></tbody>
-    </table>
+
+  <!-- 美股持倉 -->
+  <div id="h-section-us" style="display:none">
+    <div class="card">
+      <div class="card-title">
+        <span>美股市值配置</span>
+        <span style="font-size:12px;color:var(--t3);font-family:var(--mono)" id="pie-us-sub"></span>
+      </div>
+      <div class="pie-outer">
+        <div class="pie-canvas-wrap">
+          <canvas id="pieC-us" width="220" height="220"></canvas>
+          <div class="pie-center">
+            <div class="pie-center-val" id="pie-us-total">—</div>
+            <div class="pie-center-lbl">USD 市值</div>
+          </div>
+        </div>
+        <div class="pie-rank" id="pie-us-rank"></div>
+      </div>
+    </div>
+    <!-- 美股匯總數字 -->
+    <div class="metrics" style="margin-bottom:14px" id="h-us-metrics">
+      <div class="mc"><div class="mc-l">持倉市值</div><div class="mc-v" id="h-us-mv">—</div><div class="mc-s" id="h-us-mv-s"></div></div>
+      <div class="mc"><div class="mc-l">未實現損益</div><div class="mc-v" id="h-us-pnl">—</div><div class="mc-s" id="h-us-pnl-s"></div></div>
+      <div class="mc"><div class="mc-l">報酬率</div><div class="mc-v" id="h-us-ret">—</div><div class="mc-s">整體</div></div>
+      <div class="mc"><div class="mc-l">持股數</div><div class="mc-v" id="h-us-cnt">—</div><div class="mc-s">檔</div></div>
+    </div>
+    <div class="tbl-wrap">
+      <table class="base-tbl">
+        <thead><tr><th>代號</th><th>名稱</th><th>股數</th><th>均價(USD)</th><th>現價(USD)</th><th>損益%</th><th>市值(USD)</th></tr></thead>
+        <tbody id="h-us-body"><tr><td colspan="7" class="loading">載入中...</td></tr></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -674,7 +722,7 @@ function toggleTheme(){
   document.getElementById('tlabel').textContent=d?'亮色':'暗色';
   localStorage.setItem('theme',d?'light':'dark');
   if(lineChart) redrawLine();
-  if(pieChart) renderHoldings();
+  if(pieChart || pieChartUS) renderHoldings();
   renderPnlTable();
 }
 document.getElementById('hdate').textContent=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'});
@@ -684,7 +732,7 @@ function sw(id){
   document.querySelectorAll('.nav-item').forEach((t,i)=>t.classList.toggle('on',tabs[i]===id));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.getElementById('panel-'+id).classList.add('on');
-  if(id==='holdings'&&stockData.length) renderHoldings();
+  if(id==='holdings') renderHoldings();
   if(id==='history') initHistory();
   if(id==='lending') renderLending();
   if(id==='dividends') renderDividends();
@@ -795,6 +843,8 @@ async function loadUSStockData() {
       }));
     // 背景抓即時價和現金
     loadUSRealtimePrices();
+    // 如果使用者正在看美股持倉頁，立即更新
+    if(document.getElementById('h-section-us').style.display !== 'none') renderHoldingsUS();
     gas({action:'read_ib_cash'}).then(r=>{
       if(r.ok) {
         ibCashUSD=r.cash||0;
@@ -1158,16 +1208,41 @@ function renderPnlTable(){
 
 
 
+let holdingsTab = 'TW'; // 'TW' | 'US'
+let pieChartUS = null;
+
+function setHoldingsTab(tab) {
+  holdingsTab = tab;
+  // tab 按鈕樣式
+  document.getElementById('h-tab-tw').classList.toggle('on', tab==='TW');
+  document.getElementById('h-tab-us').classList.toggle('on', tab==='US');
+  document.getElementById('h-tab-tw').style.color = tab==='TW' ? '' : 'var(--t3)';
+  document.getElementById('h-tab-us').style.color = tab==='US' ? '' : 'var(--t3)';
+  // section 切換
+  document.getElementById('h-section-tw').style.display = tab==='TW' ? '' : 'none';
+  document.getElementById('h-section-us').style.display = tab==='US' ? '' : 'none';
+  renderHoldings();
+}
+
 function renderHoldings(){
+  if(holdingsTab === 'TW') {
+    renderHoldingsTW();
+  } else {
+    renderHoldingsUS();
+  }
+}
+
+function renderHoldingsTW(){
   if(pieChart) pieChart.destroy();
   const tw=stockData.filter(s=>s.mkt==='TW').sort((a,b)=>b.sh*b.price-a.sh*a.price);
   const total=tw.reduce((s,x)=>s+x.sh*x.price,0);
   const dark=document.body.classList.contains('dark');
   document.getElementById('pie-total').textContent='NT$'+Math.round(total/10000)+'萬';
+  document.getElementById('pie-tw-sub').textContent=tw.length+'檔 · NT$'+Math.round(total).toLocaleString();
   pieChart=new Chart(document.getElementById('pieC'),{
     type:'doughnut',
     data:{labels:tw.map(s=>s.name),datasets:[{data:tw.map(s=>Math.round(s.sh*s.price)),backgroundColor:PIE_COLORS,borderWidth:2,borderColor:dark?'#161920':'#fff',hoverOffset:12}]},
-    options:{responsive:false,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const pct=(c.parsed/total*100).toFixed(1);return ` ${c.label}  NT$${Math.round(c.parsed).toLocaleString()}  (${pct}%)`;}}}}},
+    options:{responsive:false,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const p=(c.parsed/total*100).toFixed(1);return ` ${c.label}  NT$${Math.round(c.parsed).toLocaleString()}  (${p}%)`;}}}}},
   });
   document.getElementById('pie-rank').innerHTML=tw.slice(0,8).map((s,i)=>`
     <div class="pie-rank-row">
@@ -1181,6 +1256,88 @@ function renderHoldings(){
       <td>${fmtPrice(s.avg)}</td><td style="color:var(--t)">${fmtPrice(s.price)}</td>
       <td class="${up?'up':'dn'}">${up?'+':''}${p.toFixed(1)}%</td>
       <td>${Math.round(s.sh*s.price).toLocaleString()}</td></tr>`;
+  }).join('');
+}
+
+function renderHoldingsUS(){
+  if(pieChartUS) pieChartUS.destroy();
+  if(!usStockData.length){
+    document.getElementById('h-us-body').innerHTML='<tr><td colspan="7" style="padding:20px;color:var(--t3);text-align:left">尚無美股持倉資料</td></tr>';
+    document.getElementById('pie-us-total').textContent='—';
+    return;
+  }
+  const us = [...usStockData].sort((a,b)=>b.sh*b.price-a.sh*a.price);
+  const totalUSD = us.reduce((s,x)=>s+x.sh*x.price, 0);
+  const totalCost = us.reduce((s,x)=>s+x.sh*x.avg, 0);
+  const totalPnl = us.reduce((s,x)=>{
+    return s+(x.ibPnl!==null&&x.ibPnl!==undefined ? x.ibPnl : x.sh*x.price-x.sh*x.avg);
+  }, 0);
+  const retPct = totalCost>0 ? totalPnl/totalCost*100 : 0;
+  const dark = document.body.classList.contains('dark');
+
+  // 圓餅圖
+  document.getElementById('pie-us-total').textContent='$'+Math.round(totalUSD).toLocaleString();
+  document.getElementById('pie-us-sub').textContent=us.length+'檔 · NT$'+Math.round(totalUSD*fxRate).toLocaleString();
+  pieChartUS = new Chart(document.getElementById('pieC-us'),{
+    type:'doughnut',
+    data:{
+      labels: us.map(s=>s.name||s.code),
+      datasets:[{
+        data: us.map(s=>+(s.sh*s.price).toFixed(2)),
+        backgroundColor: PIE_COLORS,
+        borderWidth:2,
+        borderColor: dark?'#161920':'#fff',
+        hoverOffset:12
+      }]
+    },
+    options:{
+      responsive:false,maintainAspectRatio:false,cutout:'62%',
+      plugins:{
+        legend:{display:false},
+        tooltip:{callbacks:{label:c=>{
+          const p=(c.parsed/totalUSD*100).toFixed(1);
+          return ` ${c.label}  $${c.parsed.toLocaleString('en',{maximumFractionDigits:0})}  (${p}%)`;
+        }}}
+      }
+    }
+  });
+
+  // 排名列表
+  document.getElementById('pie-us-rank').innerHTML=us.slice(0,8).map((s,i)=>`
+    <div class="pie-rank-row">
+      <div class="pie-rank-dot" style="background:${PIE_COLORS[i]}"></div>
+      <div class="pie-rank-name">${s.name||s.code}</div>
+      <div class="pie-rank-pct">${(s.sh*s.price/totalUSD*100).toFixed(1)}%</div>
+    </div>`).join('');
+
+  // 匯總卡片
+  const pup=totalPnl>=0;
+  document.getElementById('h-us-mv').textContent='$'+Math.round(totalUSD).toLocaleString();
+  document.getElementById('h-us-mv-s').textContent='NT$'+Math.round(totalUSD*fxRate).toLocaleString();
+  document.getElementById('h-us-pnl').textContent=(pup?'+':'−')+'$'+Math.abs(Math.round(totalPnl)).toLocaleString();
+  document.getElementById('h-us-pnl').className='mc-v '+(pup?'dn':'up');
+  document.getElementById('h-us-pnl-s').textContent='NT$'+Math.round(Math.abs(totalPnl)*fxRate).toLocaleString();
+  document.getElementById('h-us-pnl-s').className=pup?'dn':'up';
+  document.getElementById('h-us-ret').textContent=(pup?'+':'')+retPct.toFixed(2)+'%';
+  document.getElementById('h-us-ret').className='mc-v '+(pup?'dn':'up');
+  document.getElementById('h-us-cnt').textContent=us.length;
+
+  // 明細列表
+  document.getElementById('h-us-body').innerHTML=us.map(s=>{
+    const pnlUSD = s.ibPnl!==null&&s.ibPnl!==undefined ? s.ibPnl : s.sh*s.price-s.sh*s.avg;
+    const pnlPct = s.sh*s.avg>0 ? pnlUSD/(s.sh*s.avg)*100 : 0;
+    const up = pnlPct>=0;
+    const sharesStr = s.sh%1!==0 ? s.sh.toFixed(4) : s.sh.toLocaleString();
+    const mvUSD = s.sh*s.price;
+    return`<tr>
+      <td><span style="font-family:var(--mono);font-weight:700">${s.code}</span></td>
+      <td>${s.name}</td>
+      <td>${sharesStr}</td>
+      <td>${s.avg.toFixed(2)}</td>
+      <td style="color:var(--t);font-weight:600">${s.price.toFixed(2)}</td>
+      <td class="${up?'dn':'up'}">${up?'+':''}${pnlPct.toFixed(2)}%</td>
+      <td>$${mvUSD.toLocaleString('en',{maximumFractionDigits:0})}</td>
+    </tr>`;
   }).join('');
 }
 
