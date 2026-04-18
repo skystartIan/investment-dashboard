@@ -1386,7 +1386,7 @@ function clearCacheAndReload(){
 
 async function fetchUSHistory(){
   const fst=document.getElementById('fetch-st');
-  fst.textContent='從 Sheets 重建美股歷史走勢（TWR）...';
+  fst.textContent='從 Sheets 讀取美股 NAV 歷史...';
   try{
     const cached=cacheGet('inv_us_portfolio');
     const cacheDate=localStorage.getItem('inv_us_cache_date');
@@ -1398,13 +1398,21 @@ async function fetchUSHistory(){
       redrawLine();
       return;
     }
-    const res=await gas({action:'read_us_portfolio_history'});
+    const res=await gas({action:'read_us_nav'});
     if(!res.ok) throw new Error(res.error||'讀取失敗');
-    // 格式：[d, twr%, mv_usd]
-    usPortfolio=res.data.map(([d,twr,mv])=>({d, us:twr, mv}));
+    const navData=res.data; // [[date, nav_usd], ...]
+    if(!navData||!navData.length) throw new Error('us_nav 表無資料，請先執行 testFetchIB');
+    // 用第一天 NAV 作為基準，計算每日報酬率%
+    const baseNav=navData[0][1];
+    usPortfolio=navData.map(([d,nav])=>({
+      d,
+      us:+((nav-baseNav)/baseNav*100).toFixed(4), // 報酬率%
+      mv:nav // NAV USD
+    }));
     cacheSet('inv_us_portfolio', usPortfolio);
     localStorage.setItem('inv_us_cache_date', today);
-    fst.textContent=`美股資料載入完成 ✓ ${usPortfolio.length} 個交易日`;
+    const finalRet=usPortfolio[usPortfolio.length-1]?.us||0;
+    fst.textContent=`美股 NAV 載入完成 ✓ ${usPortfolio.length} 天 · 報酬率 ${finalRet>=0?'+':''}${finalRet.toFixed(2)}%`;
     await fetchBenchmarks();
     redrawLine();
   }catch(e){
@@ -1532,7 +1540,7 @@ function drawLine(rows){
     const myPct=rows.map(r=>({x:r.d,y:+r.us.toFixed(3)}));
     const myFinal=myPct[myPct.length-1]?.y||0;
     datasets.push({label:'美股',data:myPct,borderColor:'#4d9fff',backgroundColor:'rgba(77,159,255,0.05)',tension:0.15,fill:true,pointRadius:0,pointHoverRadius:6,borderWidth:2,yAxisID:'y'});
-    legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股 TWR</span><span class="chart-leg-pct ${myFinal>=0?'dn':'up'}">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
+    legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股 NAV報酬</span><span class="chart-leg-pct ${myFinal>=0?'dn':'up'}">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
     // Benchmark checkboxes
     const benchCfg=[
       {id:'cb-qqq',key:'QQQ',color:'#ffaa44'},
@@ -1571,7 +1579,7 @@ function drawLine(rows){
       });
       const usFinal=usPct.filter(p=>p.y!=null).pop()?.y||0;
       datasets.push({label:'美股',data:usPct,borderColor:'#4d9fff',backgroundColor:'transparent',tension:0.15,fill:false,pointRadius:0,pointHoverRadius:6,borderWidth:1.5,yAxisID:'y',spanGaps:true});
-      legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股 TWR</span><span class="chart-leg-pct ${usFinal>=0?'dn':'up'}">${usFinal>=0?'+':''}${usFinal.toFixed(2)}%</span></div>`;
+      legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股 NAV報酬</span><span class="chart-leg-pct ${usFinal>=0?'dn':'up'}">${usFinal>=0?'+':''}${usFinal.toFixed(2)}%</span></div>`;
     }
 
     // 大盤對比
@@ -1610,8 +1618,8 @@ function drawLine(rows){
           if(mkt==='US'){
             const p=row.us||0;
             document.getElementById('chb-my').style.color='#4d9fff';
-            document.getElementById('chb-my').textContent='TWR '+(p>=0?'+':'')+p.toFixed(2)+'%';
-            document.getElementById('chb-mv').textContent=row.mv?'$'+Math.round(row.mv).toLocaleString():'';
+            document.getElementById('chb-my').textContent='NAV報酬 '+(p>=0?'+':'')+p.toFixed(2)+'%';
+            document.getElementById('chb-mv').textContent=row.mv?'NAV $'+Math.round(row.mv).toLocaleString():'';
           } else {
             const base=chartRows[0]?.tw||1;
             const p=(row.tw-base)/base*100;
