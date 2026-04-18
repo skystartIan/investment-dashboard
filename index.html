@@ -1299,13 +1299,20 @@ function renderHoldingsUS(){
   document.getElementById('pie-us-sub').textContent=us.length+'檔 · NT$'+Math.round(totalUSD*fxRate).toLocaleString();
   pieChartUS=new Chart(document.getElementById('pieC-us'),{
     type:'doughnut',
-    data:{labels:us.map(s=>s.name||s.code),datasets:[{data:us.map(s=>+(s.sh*s.price).toFixed(2)),backgroundColor:PIE_COLORS,borderWidth:2,borderColor:dark?'#161920':'#fff',hoverOffset:12}]},
-    options:{responsive:false,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{const p=(c.parsed/totalUSD*100).toFixed(1);return ` ${c.label}  $${c.parsed.toLocaleString('en',{maximumFractionDigits:0})}  (${p}%)`;}}}}},
+    data:{
+      labels: us.map(s=>s.code),
+      datasets:[{data:us.map(s=>+(s.sh*s.price).toFixed(2)),backgroundColor:PIE_COLORS,borderWidth:2,borderColor:dark?'#161920':'#fff',hoverOffset:12}]
+    },
+    options:{responsive:false,maintainAspectRatio:false,cutout:'62%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>{
+      const s=us[c.dataIndex];
+      const p=(c.parsed/totalUSD*100).toFixed(1);
+      return ` ${s.code} ${s.name}  $${c.parsed.toLocaleString('en',{maximumFractionDigits:0})}  (${p}%)`;
+    }}}}},
   });
   document.getElementById('pie-us-rank').innerHTML=us.slice(0,8).map((s,i)=>`
     <div class="pie-rank-row">
       <div class="pie-rank-dot" style="background:${PIE_COLORS[i]}"></div>
-      <div class="pie-rank-name">${s.name||s.code}</div>
+      <div class="pie-rank-name" title="${s.name}">${s.code} <span style="font-size:10px;color:var(--t3)">${s.name.length>15?s.name.slice(0,15)+'…':s.name}</span></div>
       <div class="pie-rank-pct">${(s.sh*s.price/totalUSD*100).toFixed(1)}%</div>
     </div>`).join('');
 
