@@ -1386,7 +1386,7 @@ function clearCacheAndReload(){
 
 async function fetchUSHistory(){
   const fst=document.getElementById('fetch-st');
-  fst.textContent='從 Sheets 重建美股歷史走勢...';
+  fst.textContent='從 Sheets 重建美股歷史走勢（TWR）...';
   try{
     const cached=cacheGet('inv_us_portfolio');
     const cacheDate=localStorage.getItem('inv_us_cache_date');
@@ -1400,7 +1400,8 @@ async function fetchUSHistory(){
     }
     const res=await gas({action:'read_us_portfolio_history'});
     if(!res.ok) throw new Error(res.error||'讀取失敗');
-    usPortfolio=res.data.map(([d,us])=>({d,us}));
+    // 格式：[d, twr%, mv_usd]
+    usPortfolio=res.data.map(([d,twr,mv])=>({d, us:twr, mv}));
     cacheSet('inv_us_portfolio', usPortfolio);
     localStorage.setItem('inv_us_cache_date', today);
     fst.textContent=`美股資料載入完成 ✓ ${usPortfolio.length} 個交易日`;
@@ -1476,8 +1477,14 @@ function buildAndDraw(){
   const dailyStart=dailyPortfolio[0]?.d||'9999';
   const monthOnly=histMonthly.filter(h=>h[0]<dailyStart).map(h=>({d:h[0],tw:h[1]}));
   const merged=[...monthOnly,...dailyPortfolio].sort((a,b)=>a.d.localeCompare(b.d));
-  document.getElementById('snap-list').innerHTML=[...merged].reverse().slice(0,18).map(r=>`
-    <div class="snap-item"><span class="snap-date">${r.d}</span><span class="snap-val">NT$${r.tw.toLocaleString()}</span></div>`).join('');
+  // 快照列表：台股顯示 NT$，美股顯示 USD 市值
+  if(currentMarket==='US'){
+    document.getElementById('snap-list').innerHTML=[...usPortfolio].reverse().slice(0,18).map(r=>`
+      <div class="snap-item"><span class="snap-date">${r.d}</span><span class="snap-val">$${r.mv?Math.round(r.mv).toLocaleString():'—'} <span style="font-size:11px;color:var(--t3)">${r.us>=0?'+':''}${(+r.us).toFixed(2)}%</span></span></div>`).join('');
+  } else {
+    document.getElementById('snap-list').innerHTML=[...merged].reverse().slice(0,18).map(r=>`
+      <div class="snap-item"><span class="snap-date">${r.d}</span><span class="snap-val">NT$${r.tw.toLocaleString()}</span></div>`).join('');
+  }
   currentData=merged;
   redrawLine();
 }
@@ -1521,12 +1528,11 @@ function drawLine(rows){
   let legHtml='';
 
   if(mkt==='US'){
-    // 美股投資組合線
-    const base=rows[0]?.us||1;
-    const myPct=rows.map(r=>({x:r.d,y:+((r.us-base)/base*100).toFixed(3)}));
+    // 美股 TWR% 走勢線（r.us 已經是累計TWR%）
+    const myPct=rows.map(r=>({x:r.d,y:+r.us.toFixed(3)}));
     const myFinal=myPct[myPct.length-1]?.y||0;
     datasets.push({label:'美股',data:myPct,borderColor:'#4d9fff',backgroundColor:'rgba(77,159,255,0.05)',tension:0.15,fill:true,pointRadius:0,pointHoverRadius:6,borderWidth:2,yAxisID:'y'});
-    legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股</span><span class="chart-leg-pct ${myFinal>=0?'dn':'up'}">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
+    legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股 TWR</span><span class="chart-leg-pct ${myFinal>=0?'dn':'up'}">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
     // Benchmark checkboxes
     const benchCfg=[
       {id:'cb-qqq',key:'QQQ',color:'#ffaa44'},
@@ -1555,18 +1561,17 @@ function drawLine(rows){
     datasets.push({label:'台股',data:myPct,borderColor:twColor,backgroundColor:'rgba(0,200,150,0.05)',tension:0.15,fill:true,pointRadius:0,pointHoverRadius:6,borderWidth:2,yAxisID:'y'});
     legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:${twColor}"></div><span>台股</span><span class="chart-leg-pct ${myFinal>=0?'up':'dn'}">${myFinal>=0?'+':''}${myFinal.toFixed(2)}%</span></div>`;
 
-    // ALL：疊加美股線
+    // ALL：疊加美股 TWR 線
     if(mkt==='ALL'&&usPortfolio.length){
       const usMap={};usPortfolio.forEach(r=>{usMap[r.d]=r.us;});
-      let usBase=null;
-      for(const r of rows){if(usMap[r.d]){usBase=usMap[r.d];break;}}
-      if(usBase){
-        let last=null;
-        const usPct=rows.map(r=>{if(usMap[r.d]) last=usMap[r.d];return{x:r.d,y:last!=null?+((last-usBase)/usBase*100).toFixed(3):null};});
-        const usFinal=usPct.filter(p=>p.y!=null).pop()?.y||0;
-        datasets.push({label:'美股',data:usPct,borderColor:'#4d9fff',backgroundColor:'transparent',tension:0.15,fill:false,pointRadius:0,pointHoverRadius:6,borderWidth:1.5,yAxisID:'y',spanGaps:true});
-        legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股</span><span class="chart-leg-pct ${usFinal>=0?'dn':'up'}">${usFinal>=0?'+':''}${usFinal.toFixed(2)}%</span></div>`;
-      }
+      let last=null;
+      const usPct=rows.map(r=>{
+        if(usMap[r.d]!==undefined) last=usMap[r.d];
+        return{x:r.d,y:last!=null?last:null};
+      });
+      const usFinal=usPct.filter(p=>p.y!=null).pop()?.y||0;
+      datasets.push({label:'美股',data:usPct,borderColor:'#4d9fff',backgroundColor:'transparent',tension:0.15,fill:false,pointRadius:0,pointHoverRadius:6,borderWidth:1.5,yAxisID:'y',spanGaps:true});
+      legHtml+=`<div class="chart-leg"><div class="chart-leg-line" style="background:#4d9fff"></div><span>美股 TWR</span><span class="chart-leg-pct ${usFinal>=0?'dn':'up'}">${usFinal>=0?'+':''}${usFinal.toFixed(2)}%</span></div>`;
     }
 
     // 大盤對比
@@ -1603,11 +1608,10 @@ function drawLine(rows){
           hb.style.display='flex';
           document.getElementById('chb-date').textContent=fmtXLabel(row.d);
           if(mkt==='US'){
-            const base=chartRows[0]?.us||1;
-            const p=(row.us-base)/base*100;
+            const p=row.us||0;
             document.getElementById('chb-my').style.color='#4d9fff';
-            document.getElementById('chb-my').textContent='美股 '+(p>=0?'+':'')+p.toFixed(2)+'%';
-            document.getElementById('chb-mv').textContent='$'+Math.round(row.us).toLocaleString();
+            document.getElementById('chb-my').textContent='TWR '+(p>=0?'+':'')+p.toFixed(2)+'%';
+            document.getElementById('chb-mv').textContent=row.mv?'$'+Math.round(row.mv).toLocaleString():'';
           } else {
             const base=chartRows[0]?.tw||1;
             const p=(row.tw-base)/base*100;
