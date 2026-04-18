@@ -1376,6 +1376,7 @@ function cacheGet(key,maxAgeMs=CACHE_TTL_MS){try{const raw=localStorage.getItem(
 function cacheClear(){Object.keys(localStorage).filter(k=>k.startsWith('inv_')).forEach(k=>localStorage.removeItem(k));}
 function clearCacheAndReload(){
   cacheClear();
+  localStorage.removeItem('inv_us_cache_date');
   historyInited=false; usHistoryInited=false;
   dailyPortfolio=[]; twiiDaily=[]; usPortfolio=[]; benchmarkData={};
   currentData=histMonthly.map(h=>({d:h[0],tw:h[1]}));
@@ -1385,41 +1386,29 @@ function clearCacheAndReload(){
 
 async function fetchUSHistory(){
   const fst=document.getElementById('fetch-st');
-  fst.textContent='從 Sheets 讀取美股歷史股價...';
+  fst.textContent='從 Sheets 重建美股歷史走勢...';
   try{
-    // 讀取 us_prices
-    const res=await gas({action:'read', sheet:'us_prices'});
-    if(!res.ok||!res.data?.length){fst.textContent='美股歷史資料不足';return;}
-    const hdr=res.data[0].map(h=>String(h).trim());
-    const rows=res.data.slice(1).filter(r=>r[0]&&String(r[0]).slice(0,10)>='2024-04-01');
-    // 計算每日投資組合總市值（USD）
-    // 用 usStockData 的持股數×對應日期收盤價，若無數據則用前一日
-    const tickers=usStockData.map(s=>s.code);
-    const tickerCols=tickers.map(t=>hdr.indexOf(t));
-    // 找每個 ticker 的最新持股數
-    const shMap={};
-    usStockData.forEach(s=>{ shMap[s.code]=s.sh; });
-
-    usPortfolio=[];
-    let lastPrices={};
-    rows.forEach(r=>{
-      const d=String(r[0]).slice(0,10);
-      let mv=0;
-      tickers.forEach((t,i)=>{
-        const ci=tickerCols[i];
-        const v=ci>=0?parseFloat(String(r[ci]||''))||0:0;
-        if(v>0) lastPrices[t]=v;
-        mv+=(lastPrices[t]||0)*(shMap[t]||0);
-      });
-      if(mv>0) usPortfolio.push({d, us:mv});
-    });
+    const cached=cacheGet('inv_us_portfolio');
+    const cacheDate=localStorage.getItem('inv_us_cache_date');
+    const today=new Date().toISOString().slice(0,10);
+    if(cached&&cacheDate===today){
+      usPortfolio=cached;
+      fst.textContent=`美股資料載入完成 ✓ ${usPortfolio.length} 個交易日（快取）`;
+      await fetchBenchmarks();
+      redrawLine();
+      return;
+    }
+    const res=await gas({action:'read_us_portfolio_history'});
+    if(!res.ok) throw new Error(res.error||'讀取失敗');
+    usPortfolio=res.data.map(([d,us])=>({d,us}));
     cacheSet('inv_us_portfolio', usPortfolio);
-
-    // 抓 QQQ/SPY benchmark（Yahoo Finance）
-    await fetchBenchmarks();
+    localStorage.setItem('inv_us_cache_date', today);
     fst.textContent=`美股資料載入完成 ✓ ${usPortfolio.length} 個交易日`;
+    await fetchBenchmarks();
     redrawLine();
-  }catch(e){fst.textContent='美股歷史載入失敗：'+e.message;}
+  }catch(e){
+    fst.textContent='美股歷史載入失敗：'+e.message;
+  }
 }
 
 async function fetchBenchmarks(){
