@@ -1445,6 +1445,8 @@ async function fetchBenchmarks(){
     });
   }catch(_){}
 }
+
+async function fetchAllDaily(){
   const cachedPortfolio=cacheGet('inv_portfolio');
   const cachedTwii=cacheGet('inv_twii');
   const cacheDate=localStorage.getItem('inv_cache_date');
