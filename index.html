@@ -728,7 +728,7 @@ let chartRows=[];
 let currentData=histMonthly.map(h=>({d:h[0],tw:h[1]}));
 let sortMode='today', prevPrices={}, divYearFilter='2026';
 let tradeSide='buy';
-let historyInited=false;
+let historyInited=false, usHistoryInited=false;
 let selectedMonthIdx=null;
 let divRecordsCache=[...DIVIDEND_RECORDS];
 // API 撈到的 upcoming（含除息日）
@@ -1337,8 +1337,7 @@ function renderHoldingsUS(){
 }
 
 // ── 走勢圖 ──
-let usPortfolio=[], benchmarkData={}; // {QQQ:[{d,v}], SPY:[], NASDAQ:[]}
-let historyInited=false, usHistoryInited=false;
+let usPortfolio=[], benchmarkData={};
 
 async function initHistory(){
   updateHistoryForMarket();
