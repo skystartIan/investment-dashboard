@@ -2615,7 +2615,7 @@ async function uploadCsvToSheets(){
           console.log(`  check ${key} → dup=${dup}`);
           return !dup;
         })
-        .map(r=>[r.date,r.code,r.name,r.side,r.qty,r.price,'auto-from-pnl']);
+        .map(r=>[r.date,r.code,r.name,r.side,r.qty,r.price,'auto-from-pnl','','','']);
       console.log('[pnl upload] newTradeRows to write:', newTradeRows);
       if(newTradeRows.length>0){
         st.textContent=`寫入 ${newTradeRows.length} 筆交易...`;pb.style.width='45%';
