@@ -671,12 +671,32 @@ let historyInited=false, usHistoryInited=false;
 let divRecordsCache=[...DIVIDEND_RECORDS];
 
 /* ═══════════════════════════════════════════════
+   CACHE（stale-while-revalidate，加速初始渲染）
+═══════════════════════════════════════════════ */
+const _CK='invest_diary_v2', _CTL=12*60*60*1000;
+function _sc(key,val){try{const a=JSON.parse(localStorage.getItem(_CK)||'{}');a[key]={v:val,t:Date.now()};localStorage.setItem(_CK,JSON.stringify(a));}catch(_){}}
+function _rc(key){try{const a=JSON.parse(localStorage.getItem(_CK)||'{}');const e=a[key];if(e&&Date.now()-e.t<_CTL)return e.v;}catch(_){}return null;}
+function _restoreCache(){
+  const sd=_rc('stockData'),usd=_rc('usStockData'),up=_rc('usPortfolio'),
+        nav=_rc('nav'),fx=_rc('fxRate'),prev=_rc('prevPrices'),prevUS=_rc('prevPricesUS');
+  if(sd) stockData=sd;
+  if(usd) usStockData=usd;
+  if(up) usPortfolio=up;
+  if(nav){ibNavUSD=nav.n||0;ibCashUSD=nav.c||0;}
+  if(fx){fxRate=fx;document.getElementById('fx-rate-val').textContent=fx.toFixed(2);}
+  if(prev) prevPrices=prev;
+  if(prevUS) prevPricesUS=prevUS;
+  if(sd||usd){renderOverview();const st=document.getElementById('st1');st.textContent='快取 · 更新中...';st.className='status';}
+}
+
+/* ═══════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════ */
 document.getElementById('hdate').textContent=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric'});
 
 window.addEventListener('load',()=>{
-  refresh();
+  _restoreCache();   // ① 立刻用快取渲染
+  refresh();         // ② 背景更新（覆蓋快取）
   loadFxRate();
   loadUSStockData();
   loadUSNav();
@@ -698,7 +718,7 @@ async function gas(payload){
 async function loadFxRate(){
   try{
     const res=await gas({action:'get_fx_rate'});
-    if(res.ok&&res.rate){ fxRate=res.rate; document.getElementById('fx-rate-val').textContent=res.rate.toFixed(2); }
+    if(res.ok&&res.rate){ fxRate=res.rate; document.getElementById('fx-rate-val').textContent=res.rate.toFixed(2); _sc('fxRate',res.rate); }
   }catch(e){console.error('GAS error:',e);}
 }
 
@@ -754,6 +774,8 @@ async function loadUSRealtimePrices(){
         low:+(info.low52||info.week52Low||0)
       };
     });
+    _sc('usStockData',usStockData);                      // 寫快取（含最新即時價）
+    _sc('prevPricesUS',prevPricesUS);
     if(currentMarket==='US'||currentMarket==='ALL') renderOverview();
     if(document.getElementById('panel-holdings').classList.contains('on')) renderHoldings();
   }catch(_){}
@@ -785,6 +807,8 @@ async function loadUSNav(){
       const nav=+(r[ibCol])||+(r[eqCol])||0;
       return {d,us:+((nav-baseNav)/baseNav*100).toFixed(4),navUSD:nav};
     }).filter(r=>r.d&&r.navUSD>0);
+    _sc('nav',{n:ibNavUSD,c:ibCashUSD});                 // 寫快取
+    _sc('usPortfolio',usPortfolio);
     if(currentMarket==='US') renderUSNavChart();
   }catch(e){console.error('loadUSNav error:',e);}
 }
@@ -830,6 +854,7 @@ async function refresh(){
     // 同步 US stock data（避免 loadUSStockData race condition）
     const usFromHoldings=stockData.filter(s=>s.mkt==='US');
     if(usFromHoldings.length&&!usStockData.length) usStockData=usFromHoldings.map(s=>({...s,ibPnl:null}));
+    _sc('stockData',stockData);                          // 寫快取
     pb.style.width='60%';
     calcTradeFees();
     renderOverview();
@@ -837,7 +862,7 @@ async function refresh(){
     st.textContent='更新：'+new Date().toLocaleTimeString('zh-TW');
     st.className='status ok';
   }catch(e){st.textContent=e.message; st.className='status err'; pb.style.width='0%';}
-  fetchTWSEYesterdayClose().then(map=>{if(Object.keys(map).length){prevPrices=map;renderPnlTable();}}).catch(_=>{});
+  fetchTWSEYesterdayClose().then(map=>{if(Object.keys(map).length){prevPrices=map;_sc('prevPrices',map);renderPnlTable();}}).catch(_=>{});
 }
 
 async function fetchTWSEYesterdayClose(){
@@ -1304,37 +1329,4 @@ async function renderLending(){
   }catch(_){mc.innerHTML='<div style="padding:24px;color:var(--up)">讀取借券資料失敗</div>';}
 }
 
-/* ═══════════════════════════════════════════════
-   TRADES
-═══════════════════════════════════════════════ */
-function setTradeFilter(f,btn){
-  tradeFilter=f;
-  document.querySelectorAll('.trade-filter').forEach(b=>b.classList.remove('on'));
-  if(btn) btn.classList.add('on');
-  renderTrades();
-}
-
-async function renderTrades(){
-  const list=document.getElementById('trade-list');
-  let trades=[];
-  // US trades (already loaded)
-  if(tradeFilter!=='TW') trades.push(...usTradesData);
-  // TW trades
-  if(tradeFilter!=='US'){
-    try{
-      const res=await gas({action:'read',sheet:'trades_tw'});
-      if(res.ok&&res.data?.length>1){
-        const hdr=res.data[0].map(h=>String(h).trim().toLowerCase());
-        // Bug1 fix: 用 findIndex 搭配 regex，避免 indexOf 回傳 0 被 ||fb 誤判
-        const dtI=hdr.findIndex(h=>/^(date|日期)$/.test(h));
-        const tkI=hdr.findIndex(h=>/^(code|ticker|symbol|股票代號)$/.test(h));
-        const sdI=hdr.findIndex(h=>/^(side|action|type|方向|買賣)$/.test(h));
-        const qtI=hdr.findIndex(h=>/^(qty|quantity|shares|數量)$/.test(h));
-        const prI=hdr.findIndex(h=>/^(price|close|成交價)$/.test(h));
-        const ci=(i,fb)=>i>=0?i:fb;
-        const twTrades=res.data.slice(1).filter(r=>r[0]).map(r=>({
-          date:String(r[ci(dtI,0)]).slice(0,10),
-          ticker:String(r[ci(tkI,1)]).padStart(4,'0'),
-          // Bug2+3 fix: price 欄不存在時給 0；side 支援中英文與 B/S
-          side:(()=>{const s=String(r[ci(sdI,2)]||'').trim().toUpperCase();return s==='買'||s==='B'||s==='BUY'?'BUY':'SELL';})(),
-          
+/* ═════════�
