@@ -679,6 +679,7 @@ function _rc(key){try{const a=JSON.parse(localStorage.getItem(_CK)||'{}');const 
 function _restoreCache(){
   const sd=_rc('stockData'),usd=_rc('usStockData'),up=_rc('usPortfolio'),
         nav=_rc('nav'),fx=_rc('fxRate'),prev=_rc('prevPrices'),prevUS=_rc('prevPricesUS');
+  console.log('[Cache]',{stockData:!!sd,usStockData:!!usd,nav:!!nav,fxRate:!!fx,prevPrices:!!prev});
   if(sd) stockData=sd;
   if(usd) usStockData=usd;
   if(up) usPortfolio=up;
@@ -746,6 +747,7 @@ async function loadUSStockData(){
         name:String(r[ci(nmCol,5)]||r[ci(tiCol,0)]).trim(),
         ibPnl:ibPnlCol>=0?(+r[ibPnlCol]||0):null
       })).filter(s=>s.sh>0);
+    _sc('usStockData',usStockData);                       // 先快取基礎資料（不含即時價）
     loadUSRealtimePrices();
     // ibNavUSD + ibCashUSD 已由 loadUSNav 從 us_nav sheet 讀取
     if(currentMarket==='US'||currentMarket==='ALL'){renderOverview();renderHoldings();}
@@ -1325,8 +1327,4 @@ async function renderLending(){
     mc.innerHTML=`<div class="mc green"><div class="mc-label">借券總收益</div><div class="mc-v">NT$${Math.round(totalIncome).toLocaleString()}</div></div>
       <div class="mc blue"><div class="mc-label">借券筆數</div><div class="mc-v">${rows.length}</div></div>`;
     tbl.innerHTML=`<table class="div-table" style="width:100%"><thead><tr>${hdr.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
-      ${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-  }catch(_){mc.innerHTML='<div style="padding:24px;color:var(--up)">讀取借券資料失敗</div>';}
-}
-
-/* ═════════�
+      ${rows.map(r=>`<tr>${r.m
