@@ -1327,4 +1327,69 @@ async function renderLending(){
     mc.innerHTML=`<div class="mc green"><div class="mc-label">借券總收益</div><div class="mc-v">NT$${Math.round(totalIncome).toLocaleString()}</div></div>
       <div class="mc blue"><div class="mc-label">借券筆數</div><div class="mc-v">${rows.length}</div></div>`;
     tbl.innerHTML=`<table class="div-table" style="width:100%"><thead><tr>${hdr.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>
-      ${rows.map(r=>`<tr>${r.m
+      ${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  }catch(_){mc.innerHTML='<div style="padding:24px;color:var(--up)">讀取借券資料失敗</div>';}
+}
+
+/* ═══════════════════════════════════════════════
+   TRADES
+═══════════════════════════════════════════════ */
+function setTradeFilter(f,btn){
+  tradeFilter=f;
+  document.querySelectorAll('.trade-filter').forEach(b=>b.classList.remove('on'));
+  if(btn) btn.classList.add('on');
+  renderTrades();
+}
+
+async function renderTrades(){
+  const list=document.getElementById('trade-list');
+  let trades=[];
+  if(tradeFilter!=='TW') trades.push(...usTradesData);
+  if(tradeFilter!=='US'){
+    try{
+      const res=await gas({action:'read',sheet:'trades_tw'});
+      if(res.ok&&res.data?.length>1){
+        const hdr=res.data[0].map(h=>String(h).trim().toLowerCase());
+        const dtI=hdr.findIndex(h=>/^(date|日期)$/.test(h));
+        const tkI=hdr.findIndex(h=>/^(code|ticker|symbol|股票代號)$/.test(h));
+        const sdI=hdr.findIndex(h=>/^(side|action|type|方向|買賣)$/.test(h));
+        const qtI=hdr.findIndex(h=>/^(qty|quantity|shares|數量)$/.test(h));
+        const prI=hdr.findIndex(h=>/^(price|close|成交價)$/.test(h));
+        const ci=(i,fb)=>i>=0?i:fb;
+        const twTrades=res.data.slice(1).filter(r=>r[0]).map(r=>({
+          date:String(r[ci(dtI,0)]).slice(0,10),
+          ticker:String(r[ci(tkI,1)]).padStart(4,'0'),
+          side:(()=>{const s=String(r[ci(sdI,2)]||'').trim().toUpperCase();return s==='買'||s==='B'||s==='BUY'?'BUY':'SELL';})(),
+          qty:+r[ci(qtI,3)]||0,
+          price:prI>=0?(+r[prI]||0):0,
+          fee:0,mkt:'TW'
+        }));
+        trades.push(...twTrades);
+      }
+    }catch(_){}
+  }
+  trades.sort((a,b)=>b.date.localeCompare(a.date));
+  if(tradeFilter==='BUY') trades=trades.filter(t=>t.side==='BUY');
+  if(tradeFilter==='SELL') trades=trades.filter(t=>t.side==='SELL');
+  if(!trades.length){list.innerHTML='<div style="text-align:center;padding:32px;color:var(--txt2)">暫無交易紀錄</div>';return;}
+  list.innerHTML=trades.slice(0,100).map((t,i)=>{
+    const isUS=t.mkt==='US';
+    const isBuy=t.side==='BUY';
+    const amt=t.qty*t.price;
+    return `<div class="trade-row" style="animation-delay:${i*0.03}s">
+      <span class="t-date">${t.date}</span>
+      <span class="t-ticker">${t.ticker}</span>
+      <span class="${isBuy?'t-buy':'t-sell'}">${isBuy?'▲ 買':'▼ 賣'}</span>
+      <span style="font-weight:700">${t.qty.toLocaleString()}</span>
+      <span style="font-family:var(--mono);font-weight:700">${isUS?'$':'NT$'}${t.price.toLocaleString()}</span>
+      <span style="font-family:var(--mono);font-weight:700">${isUS?'$':'NT$'}${Math.round(amt).toLocaleString()}</span>
+      <span style="color:var(--txt2);font-weight:700">${t.fee?'$'+t.fee.toLocaleString():isUS?'':'--'}</span>
+    </div>`;
+  }).join('');
+}
+
+/* BOOT */
+renderOverview();
+</script>
+</body>
+</html>
