@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>📈 投資儀表板</title>
+<title>📖 投資日記</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════════
@@ -59,7 +59,7 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-@keyframes hdrGrad {
+@keyframes hdrMorandi {
   0%   { background-position: 0% 50%; }
   50%  { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
@@ -93,8 +93,9 @@ body {
    HEADER
 ═══════════════════════════════════════════════ */
 #hdr {
-  background: linear-gradient(135deg, #3A3530 0%, #4E5564 30%, #5E6E7F 60%, #7B8FA6 100%);
-
+  background: linear-gradient(135deg, #3A3530, #4E5564, #7B8FA6, #9B8EAC, #7D9B8A, #C4A882, #5E6E7F, #3A3530);
+  background-size: 400% 400%;
+  animation: hdrMorandi 16s ease infinite;
   color: #fff;
   padding: 20px 28px 16px;
   position: sticky; top: 0; z-index: 100;
@@ -403,7 +404,7 @@ body {
 <div id="hdr">
   <div id="hdr-top">
     <div>
-      <div id="hdr-title">📈 投資儀表板</div>
+      <div id="hdr-title">📖 投資日記</div>
       <div id="hdate"></div>
     </div>
     <div id="hdr-right">
@@ -593,6 +594,16 @@ body {
 
 <script>
 /* ═══════════════════════════════════════════════
+   MARKET NORMALIZER
+═══════════════════════════════════════════════ */
+function normMkt(v){
+  const s=String(v||'').trim().toUpperCase();
+  if(['US','美股','USD','USSTOCK','US STOCK'].includes(s)) return 'US';
+  if(['TW','台股','TWD','TWSTOCK','TW STOCK'].includes(s)) return 'TW';
+  return s;
+}
+
+/* ═══════════════════════════════════════════════
    CONSTANTS & STATE
 ═══════════════════════════════════════════════ */
 const GAS='https://script.google.com/macros/s/AKfycbxs6SGJCCraFtTAfq9L_NMeL7fyvM_HnZ7HPklCJpoRNJemPacdBpXNuzRz0NuRKDLVQg/exec';
@@ -688,30 +699,37 @@ async function loadFxRate(){
   try{
     const res=await gas({action:'get_fx_rate'});
     if(res.ok&&res.rate){ fxRate=res.rate; document.getElementById('fx-rate-val').textContent=res.rate.toFixed(2); }
-  }catch(_){}
+  }catch(e){console.error('GAS error:',e);}
 }
 
 async function loadUSStockData(){
   try{
-    const res=await gas({action:'read',sheet:'holdings'});
+    const res=await gas({action:'read',sheet:'holdings_us'});
     if(!res.ok) return;
-    const hdr=res.data[0].map(h=>String(h).trim());
-    const tiCol=0,mktCol=1,shCol=2,avCol=3,prCol=4,nmCol=5;
-    const ibPnlCol=hdr.indexOf('ib_pnl');
+    const hdr=res.data[0].map(h=>String(h).trim().toLowerCase());
+    const tiCol=hdr.findIndex(h=>/^(ticker|code|symbol|stock)$/.test(h));
+    const mktCol=hdr.findIndex(h=>/^(market|mkt)$/.test(h));
+    const shCol=hdr.findIndex(h=>/^(shares|qty|quantity|sh|lots)$/.test(h));
+    const avCol=hdr.findIndex(h=>/^(avg|avg_cost|average|cost|avg_price)$/.test(h));
+    const prCol=hdr.findIndex(h=>/^(price|close|current|current_price|last)$/.test(h));
+    const nmCol=hdr.findIndex(h=>/^(name|stock_name|company)$/.test(h));
+    const ibPnlCol=hdr.findIndex(h=>/^(ib_pnl|ibpnl|unrealized_pnl)$/.test(h));
+    // fallback to positional if header not found
+    const ci=(i,fb)=>i>=0?i:fb;
     usStockData=res.data.slice(1)
-      .filter(r=>r[0]&&String(r[mktCol]).trim()==='US')
+      .filter(r=>r[0]&&normMkt(r[ci(mktCol,1)])==='US')
       .map(r=>({
-        code:String(r[tiCol]).trim(), mkt:'US',
-        sh:+r[shCol], avg:+r[avCol], price:+r[prCol],
-        name:String(r[nmCol]||r[tiCol]).trim(),
+        code:String(r[ci(tiCol,0)]).trim(), mkt:'US',
+        sh:+r[ci(shCol,2)]||0,
+        avg:+r[ci(avCol,3)]||0,
+        price:+r[ci(prCol,4)]||0,
+        name:String(r[ci(nmCol,5)]||r[ci(tiCol,0)]).trim(),
         ibPnl:ibPnlCol>=0?(+r[ibPnlCol]||0):null
-      }));
+      })).filter(s=>s.sh>0);
     loadUSRealtimePrices();
-    gas({action:'read_ib_cash'}).then(r=>{
-      if(r.ok){ibCashUSD=r.cash||0;ibNavUSD=r.nav||0;if(currentMarket==='US'||currentMarket==='ALL') renderOverview();}
-    }).catch(_=>{});
+    // ibNavUSD + ibCashUSD 已由 loadUSNav 從 us_nav sheet 讀取
     if(currentMarket==='US'||currentMarket==='ALL'){renderOverview();renderHoldings();}
-  }catch(_){}
+  }catch(e){console.error('loadUSStockData error:',e);}
 }
 
 async function loadUSRealtimePrices(){
@@ -719,14 +737,22 @@ async function loadUSRealtimePrices(){
   try{
     const tickers=usStockData.map(s=>s.code);
     const res=await gas({action:'get_realtime_prices',codes:tickers,market:'US'});
-    if(!res.ok||!res.data) return;
-    realtimePrices=res.data;
+    if(!res.ok) return;
+    // 格式1: res.data = {TICKER:{price,prevClose,...}}
+    const raw=res.data||res.prices||{};
+    realtimePrices=raw;
     usStockData.forEach(s=>{
-      if(realtimePrices[s.code]){
-        prevPricesUS[s.code]=realtimePrices[s.code].prevClose;
-        s.price=realtimePrices[s.code].price;
-        if(realtimePrices[s.code].high52) week52Data[s.code]={high:realtimePrices[s.code].high52,low:realtimePrices[s.code].low52};
-      }
+      const info=raw[s.code]||raw[s.code.toUpperCase()]||raw[s.code.toLowerCase()];
+      if(!info) return;
+      // 支援多種欄位名稱
+      const newPrice=+(info.price||info.last||info.close||info.currentPrice||0);
+      const prevClose=+(info.prevClose||info.prev_close||info.previousClose||info.yesterdayClose||0);
+      if(newPrice>0) s.price=newPrice;
+      if(prevClose>0) prevPricesUS[s.code]=prevClose;
+      if(info.high52||info.week52High) week52Data[s.code]={
+        high:+(info.high52||info.week52High||0),
+        low:+(info.low52||info.week52Low||0)
+      };
     });
     if(currentMarket==='US'||currentMarket==='ALL') renderOverview();
     if(document.getElementById('panel-holdings').classList.contains('on')) renderHoldings();
@@ -735,13 +761,32 @@ async function loadUSRealtimePrices(){
 
 async function loadUSNav(){
   try{
-    const res=await gas({action:'read_us_nav',sheet:'us_nav'});
+    // us_nav sheet columns: date | ib_nav_usd | equity_usd | margin_usd（降冪，最新在第一行）
+    const res=await gas({action:'read',sheet:'us_nav'});
     if(!res.ok||!res.data?.length) return;
-    const navData=res.data;
-    const baseNav=navData[0][1];
-    usPortfolio=navData.map(([d,nav])=>({d,us:+((nav-baseNav)/baseNav*100).toFixed(4),navUSD:nav}));
+    const hdr=res.data[0].map(h=>String(h).trim().toLowerCase());
+    const dtCol=hdr.indexOf('date');
+    const ibCol=hdr.indexOf('ib_nav_usd');
+    const eqCol=hdr.indexOf('equity_usd');
+    const mgCol=hdr.indexOf('margin_usd');
+    const rows=res.data.slice(1).filter(r=>r[dtCol]!==''&&r[dtCol]!==undefined);
+    if(!rows.length) return;
+    const latest=rows[0];
+    ibNavUSD =+(latest[ibCol])||+(latest[eqCol])||0;
+    ibCashUSD=+(latest[mgCol])||0;
+    if(currentMarket==='US'||currentMarket==='ALL') renderOverview();
+    // 升冪排列以建立趨勢圖
+    const asc=[...rows].reverse();
+    const baseNav=+(asc[0]?.[ibCol])||+(asc[0]?.[eqCol])||1;
+    usPortfolio=asc.map(r=>{
+      const d=r[dtCol] instanceof Date
+        ? r[dtCol].toISOString().slice(0,10)
+        : String(r[dtCol]).slice(0,10);
+      const nav=+(r[ibCol])||+(r[eqCol])||0;
+      return {d,us:+((nav-baseNav)/baseNav*100).toFixed(4),navUSD:nav};
+    }).filter(r=>r.d&&r.navUSD>0);
     if(currentMarket==='US') renderUSNavChart();
-  }catch(_){}
+  }catch(e){console.error('loadUSNav error:',e);}
 }
 
 async function loadUSTrades(){
@@ -764,11 +809,27 @@ async function refresh(){
   const st=document.getElementById('st1'),pb=document.getElementById('prog1');
   st.textContent='讀取中...'; st.className='status'; pb.style.width='15%';
   try{
-    const res=await gas({action:'read',sheet:'holdings'});
+    const res=await gas({action:'read',sheet:'holdings_tw'});
     if(!res.ok) throw new Error(res.error||'讀取失敗');
+    const hdr2=res.data[0].map(h=>String(h).trim().toLowerCase());
+    const _ti=hdr2.findIndex(h=>/^(ticker|code|symbol|stock)$/.test(h));
+    const _mk=hdr2.findIndex(h=>/^(market|mkt)$/.test(h));
+    const _sh=hdr2.findIndex(h=>/^(shares|qty|quantity|sh|lots)$/.test(h));
+    const _av=hdr2.findIndex(h=>/^(avg|avg_cost|average|cost|avg_price)$/.test(h));
+    const _pr=hdr2.findIndex(h=>/^(price|close|current|current_price|last)$/.test(h));
+    const _nm=hdr2.findIndex(h=>/^(name|stock_name|company)$/.test(h));
+    const _c=(i,fb)=>i>=0?i:fb;
     stockData=res.data.slice(1).filter(r=>r[0]).map(r=>({
-      code:String(r[0]),mkt:r[1],sh:+r[2],avg:+r[3],price:+r[4],name:r[5]||r[0]
-    }));
+      code:String(r[_c(_ti,0)]).trim(),
+      mkt:normMkt(r[_c(_mk,1)]),
+      sh:+r[_c(_sh,2)]||0,
+      avg:+r[_c(_av,3)]||0,
+      price:+r[_c(_pr,4)]||0,
+      name:String(r[_c(_nm,5)]||r[_c(_ti,0)]).trim()
+    })).filter(r=>r.sh>0);
+    // 同步 US stock data（避免 loadUSStockData race condition）
+    const usFromHoldings=stockData.filter(s=>s.mkt==='US');
+    if(usFromHoldings.length&&!usStockData.length) usStockData=usFromHoldings.map(s=>({...s,ibPnl:null}));
     pb.style.width='60%';
     calcTradeFees();
     renderOverview();
@@ -782,23 +843,34 @@ async function refresh(){
 async function fetchTWSEYesterdayClose(){
   const map={};
   try{
-    const res=await gas({action:'read',sheet:'prices'});
-    if(!res.ok||!res.data?.length) return map;
-    const header=res.data[0].map(h=>{const s=String(h).trim();return /^\d{1,3}$/.test(s)?s.padStart(4,'0'):s;});
-    const rows=res.data.slice(1).filter(r=>r[0]);
-    if(rows.length<2) return map;
-    const lastDate=String(rows[rows.length-1][0]).slice(0,10);
-    let prevRow=null;
-    for(let i=rows.length-2;i>=0;i--){if(String(rows[i][0]).slice(0,10)!==lastDate){prevRow=rows[i];break;}}
-    if(!prevRow) return map;
-    header.forEach((code,i)=>{if(!/^\d{4}$/.test(code)) return;const v=parseFloat(String(prevRow[i]||'').replace(/,/g,''));if(!isNaN(v)&&v>0) map[code]=v;});
+    const res=await gas({action:'read',sheet:'prices_tw'});
+    if(!res.ok) return map;
+    // 格式1: {data:[[date,code1,code2,...],[date,p1,p2,...],...]} 寬格式
+    if(res.data?.length>1){
+      const header=res.data[0].map(h=>{const s=String(h).trim();return /^\d{1,3}$/.test(s)?s.padStart(4,'0'):s;});
+      const rows=res.data.slice(1).filter(r=>r[0]);
+      if(rows.length>=1){
+        const lastDate=String(rows[rows.length-1][0]).slice(0,10);
+        let prevRow=rows.length>1?null:rows[0];
+        if(!prevRow){for(let i=rows.length-2;i>=0;i--){if(String(rows[i][0]).slice(0,10)!==lastDate){prevRow=rows[i];break;}}}
+        const useRow=prevRow||rows[rows.length-1];
+        header.forEach((code,i)=>{if(!/^\d{4}$/.test(code)) return;const v=parseFloat(String(useRow[i]||'').replace(/,/g,''));if(!isNaN(v)&&v>0) map[code]=v;});
+      }
+    }
+    // 格式2: {prices:{code:price,...}} 物件格式
+    if(res.prices&&typeof res.prices==='object'){
+      Object.entries(res.prices).forEach(([code,price])=>{
+        const c=String(code).padStart(4,'0');
+        if(+price>0) map[c]=+price;
+      });
+    }
   }catch(_){}
   return map;
 }
 
 async function calcTradeFees(){
   try{
-    const res=await gas({action:'read',sheet:'trades'});
+    const res=await gas({action:'read',sheet:'trades_tw'});
     if(!res.ok||res.data.length<2) return;
     const hdr=res.data[0].map(h=>String(h).trim());
     const cdCol=hdr.indexOf('code'),sdCol=hdr.indexOf('side'),qtCol=hdr.indexOf('qty'),
@@ -1111,7 +1183,7 @@ function renderUSNavChart(){
   const labels=rows.map(r=>r.d);
   const vals=rows.map(r=>r.navUSD||0);
   const datasets=[{
-    label:'IB NAV (USD)',
+    label:'IB NAV (USD) · 來源: us_nav',
     data:vals,
     borderColor:'#7D9B8A',
     backgroundColor:'rgba(125,155,138,.10)',
@@ -1175,10 +1247,16 @@ async function loadUSDividends(twRecords,mkt){
       const hdr=res.data[0].map(h=>String(h).trim());
       const mktI=hdr.indexOf('market'),tkI=hdr.indexOf('ticker'),dtI=hdr.indexOf('date'),
             amtI=hdr.indexOf('amount'),tpI=hdr.indexOf('type'),curI=hdr.indexOf('currency');
-      usDiv=res.data.slice(1).filter(r=>r[0]).map(r=>({
-        date:String(r[dtI]).slice(0,10),ticker:String(r[tkI]).trim(),name:String(r[tkI]).trim(),
-        amount:+r[amtI]||0,currency:String(r[curI]).trim(),type:String(r[tpI]).trim(),mkt:'US'
-      }));
+      usDiv=res.data.slice(1)
+        .filter(r=>r[0]&&(mktI<0||normMkt(r[mktI])==='US'))
+        .map(r=>({
+          date:String(r[dtI]).slice(0,10),
+          ticker:String(r[tkI]).trim(),
+          name:String(r[hdr.indexOf('name')]||r[tkI]).trim(),
+          amount:+r[amtI]||0,
+          currency:String(r[curI]).trim(),
+          type:String(r[tpI]).trim(),mkt:'US'
+        }));
     }
   }catch(_){}
   const all=(mkt==='US'?usDiv:(mkt==='TW'?twRecords:[...twRecords,...usDiv]))
@@ -1213,7 +1291,7 @@ async function renderLending(){
   const tbl=document.getElementById('lending-table');
   mc.innerHTML='<div class="skeleton" style="height:100px"></div><div class="skeleton" style="height:100px;opacity:.7"></div>';
   try{
-    const res=await gas({action:'read_prices',sheet:'lending'});
+    const res=await gas({action:'read',sheet:'lending'});
     if(!res.ok||!res.data?.length){mc.innerHTML='<div style="padding:32px;text-align:center;color:var(--txt2)">暫無借券資料</div>';return;}
     const hdr=res.data[0].map(h=>String(h).trim());
     const rows=res.data.slice(1).filter(r=>r[0]);
@@ -1244,7 +1322,7 @@ async function renderTrades(){
   // TW trades
   if(tradeFilter!=='US'){
     try{
-      const res=await gas({action:'read',sheet:'trades'});
+      const res=await gas({action:'read',sheet:'trades_tw'});
       if(res.ok&&res.data?.length>1){
         const hdr=res.data[0].map(h=>String(h).trim());
         const dtI=hdr.indexOf('date')||0,tkI=hdr.indexOf('code')||1,sdI=hdr.indexOf('side'),
@@ -1264,22 +1342,4 @@ async function renderTrades(){
   if(!trades.length){list.innerHTML='<div style="text-align:center;padding:32px;color:var(--txt2)">暫無交易紀錄</div>';return;}
   list.innerHTML=trades.slice(0,100).map((t,i)=>{
     const isUS=t.mkt==='US';
-    const isBuy=t.side==='BUY';
-    const amt=t.qty*t.price;
-    return `<div class="trade-row" style="animation-delay:${i*0.03}s">
-      <span class="t-date">${t.date}</span>
-      <span class="t-ticker">${t.ticker}</span>
-      <span class="${isBuy?'t-buy':'t-sell'}">${isBuy?'▲ 買':'▼ 賣'}</span>
-      <span style="font-weight:700">${t.qty.toLocaleString()}</span>
-      <span style="font-family:var(--mono);font-weight:700">${isUS?'$':'NT$'}${t.price.toLocaleString()}</span>
-      <span style="font-family:var(--mono);font-weight:700">${isUS?'$':'NT$'}${Math.round(amt).toLocaleString()}</span>
-      <span style="color:var(--txt2);font-weight:700">${t.fee?'$'+t.fee.toLocaleString():isUS?'':'--'}</span>
-    </div>`;
-  }).join('');
-}
-
-/* BOOT */
-renderOverview();
-</script>
-</body>
-</html>
+    const isBuy=t.side=
