@@ -1324,22 +1324,17 @@ async function renderTrades(){
     try{
       const res=await gas({action:'read',sheet:'trades_tw'});
       if(res.ok&&res.data?.length>1){
-        const hdr=res.data[0].map(h=>String(h).trim());
-        const dtI=hdr.indexOf('date')||0,tkI=hdr.indexOf('code')||1,sdI=hdr.indexOf('side'),
-              qtI=hdr.indexOf('qty'),prI=hdr.indexOf('price');
+        const hdr=res.data[0].map(h=>String(h).trim().toLowerCase());
+        // Bug1 fix: 用 findIndex 搭配 regex，避免 indexOf 回傳 0 被 ||fb 誤判
+        const dtI=hdr.findIndex(h=>/^(date|日期)$/.test(h));
+        const tkI=hdr.findIndex(h=>/^(code|ticker|symbol|股票代號)$/.test(h));
+        const sdI=hdr.findIndex(h=>/^(side|action|type|方向|買賣)$/.test(h));
+        const qtI=hdr.findIndex(h=>/^(qty|quantity|shares|數量)$/.test(h));
+        const prI=hdr.findIndex(h=>/^(price|close|成交價)$/.test(h));
+        const ci=(i,fb)=>i>=0?i:fb;
         const twTrades=res.data.slice(1).filter(r=>r[0]).map(r=>({
-          date:String(r[dtI]).slice(0,10),ticker:String(r[tkI]).padStart(4,'0'),
-          side:String(r[sdI]).trim()==='買'?'BUY':'SELL',
-          qty:+r[qtI],price:+r[prI],fee:0,mkt:'TW'
-        }));
-        trades.push(...twTrades);
-      }
-    }catch(_){}
-  }
-  trades.sort((a,b)=>b.date.localeCompare(a.date));
-  if(tradeFilter==='BUY') trades=trades.filter(t=>t.side==='BUY');
-  if(tradeFilter==='SELL') trades=trades.filter(t=>t.side==='SELL');
-  if(!trades.length){list.innerHTML='<div style="text-align:center;padding:32px;color:var(--txt2)">暫無交易紀錄</div>';return;}
-  list.innerHTML=trades.slice(0,100).map((t,i)=>{
-    const isUS=t.mkt==='US';
-    const isBuy=t.side=
+          date:String(r[ci(dtI,0)]).slice(0,10),
+          ticker:String(r[ci(tkI,1)]).padStart(4,'0'),
+          // Bug2+3 fix: price 欄不存在時給 0；side 支援中英文與 B/S
+          side:(()=>{const s=String(r[ci(sdI,2)]||'').trim().toUpperCase();return s==='買'||s==='B'||s==='BUY'?'BUY':'SELL';})(),
+          
