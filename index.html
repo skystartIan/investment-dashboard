@@ -1279,7 +1279,7 @@ async function loadTWHistory(){
       });
       const twii=twiiIdx>=0?(+r[twiiIdx]||null):null;
       return {date,pv,twii};
-    }).filter(r=>r.date&&r.pv>0);
+    }).filter(r=>r.date&&r.pv>0).sort((a,b)=>a.date.localeCompare(b.date));
     _sc('twHistoryData',twHistoryData);
     if(currentMarket!=='US') updateHistoryChart();
   }catch(e){console.error('loadTWHistory error:',e);}
