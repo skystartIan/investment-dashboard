@@ -507,7 +507,13 @@ body {
 <!-- ════════════════════ HOLDINGS ════════════════════ -->
 <div class="panel" id="panel-holdings">
 <div class="panel-inner">
-  <div class="section-title">💼 持倉詳情</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div class="section-title" style="margin:0">💼 持倉詳情</div>
+    <div style="display:flex;gap:6px">
+      <button class="range-btn on" id="view-card-btn" onclick="setHoldingsView('card',this)">⊞ 卡片</button>
+      <button class="range-btn" id="view-list-btn" onclick="setHoldingsView('list',this)">☰ 列表</button>
+    </div>
+  </div>
   <div id="holdings-content">
     <div class="holdings-grid" id="holdings-grid">
       <div class="skeleton" style="height:200px"></div>
@@ -668,6 +674,7 @@ let divYearFilter='2026';
 let tradeFilter='all';
 let allTrades=[], usTradesData=[];
 let historyInited=false, usHistoryInited=false;
+let twHistoryData=[], holdingsView='card';
 let divRecordsCache=[...DIVIDEND_RECORDS];
 
 /* ═══════════════════════════════════════════════
@@ -687,6 +694,7 @@ function _restoreCache(){
   if(fx){fxRate=fx;document.getElementById('fx-rate-val').textContent=fx.toFixed(2);}
   if(prev) prevPrices=prev;
   if(prevUS) prevPricesUS=prevUS;
+  const twhd=_rc('twHistoryData'); if(twhd&&twhd.length) twHistoryData=twhd;
   if(sd||usd){renderOverview();const st=document.getElementById('st1');st.textContent='快取 · 更新中...';st.className='status';}
 }
 
@@ -702,6 +710,7 @@ window.addEventListener('load',()=>{
   loadUSStockData();
   loadUSNav();
   loadUSTrades();
+  loadTWHistory();   // ③ 台股每日走勢
 });
 
 /* ═══════════════════════════════════════════════
@@ -1111,28 +1120,99 @@ function renderPnlTable(){
 /* ═══════════════════════════════════════════════
    HOLDINGS CARDS
 ═══════════════════════════════════════════════ */
+function setHoldingsView(v,btn){
+  holdingsView=v;
+  document.querySelectorAll('#view-card-btn,#view-list-btn').forEach(b=>b.classList.remove('on'));
+  if(btn) btn.classList.add('on');
+  renderHoldings();
+}
+
 function renderHoldings(){
   const mkt=currentMarket;
   let stocks=[];
   if(mkt==='TW'||mkt==='ALL') stocks.push(...stockData.filter(s=>s.mkt==='TW'));
   if(mkt==='US'||mkt==='ALL') stocks.push(...usStockData);
-  stocks.sort((a,b)=>b.sh*b.price-a.sh*a.price);
+  stocks.sort((a,b)=>b.sh*b.price*(b.mkt==='US'?fxRate:1)-(a.sh*a.price*(a.mkt==='US'?fxRate:1)));
   const grid=document.getElementById('holdings-grid');
   if(!stocks.length){grid.innerHTML='<div style="padding:40px;text-align:center;color:var(--txt2)">暫無持倉資料</div>';return;}
   const totalMV=stocks.reduce((s,x)=>s+x.sh*x.price*(x.mkt==='US'?fxRate:1),0);
+
+  // 今日漲跌輔助（加入合理性驗證，差距超 50% 視為資料過舊）
+  function getTodayStr(s){
+    const isUS=s.mkt==='US';
+    if(isUS){
+      const g=dayGainUS(s); if(g===null) return '';
+      const chg=dayChgUS(s)||0;
+      if(Math.abs(chg)>50) return '';  // 異常值
+      return sign(g)+'$'+fmtNum(g)+'  '+fmtPct(chg);
+    } else {
+      const p=prevPrices[s.code];
+      if(!p||p<=0) return '';
+      const chg=(s.price-p)/p*100;
+      if(Math.abs(chg)>30) return '';  // 昨收過舊，不顯示
+      return (s.price>=p?'+':'-')+'NT$'+fmtNum((s.price-p)*s.sh)+'  '+fmtPct(chg);
+    }
+  }
+
+  // ── 列表模式 ──
+  if(holdingsView==='list'){
+    grid.innerHTML=`<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:.93rem">
+      <thead><tr style="background:#EDE8E2;color:var(--txt2);font-size:.78rem;text-transform:uppercase;letter-spacing:.5px">
+        <th style="padding:10px 12px;text-align:left;border-bottom:2px solid var(--border)">代碼</th>
+        <th style="padding:10px 12px;text-align:left;border-bottom:2px solid var(--border)">名稱</th>
+        <th style="padding:10px 12px;text-align:right;border-bottom:2px solid var(--border)">股數</th>
+        <th style="padding:10px 12px;text-align:right;border-bottom:2px solid var(--border)">均價</th>
+        <th style="padding:10px 12px;text-align:right;border-bottom:2px solid var(--border)">現價</th>
+        <th style="padding:10px 12px;text-align:right;border-bottom:2px solid var(--border)">市值 NT$</th>
+        <th style="padding:10px 12px;text-align:right;border-bottom:2px solid var(--border)">損益</th>
+        <th style="padding:10px 12px;text-align:right;border-bottom:2px solid var(--border)">報酬率</th>
+        <th style="padding:10px 12px;text-align:right;border-bottom:2px solid var(--border)">佔比</th>
+      </tr></thead>
+      <tbody>${stocks.map((s,i)=>{
+        const isUS=s.mkt==='US';
+        const mv=s.sh*s.price*(isUS?fxRate:1);
+        const mvPct=totalMV>0?mv/totalMV*100:0;
+        const gainLocal=(s.price-s.avg)*s.sh;
+        const gainNTD=Math.round(gainLocal*(isUS?fxRate:1));
+        const gainPct=s.avg>0?(s.price-s.avg)/s.avg*100:0;
+        const gup=gainNTD>=0;
+        const posC=isUS?'var(--dn)':'var(--up)';
+        const negC=isUS?'var(--up)':'var(--dn)';
+        const col=PIE_COLORS[i%PIE_COLORS.length];
+        const dayStr=getTodayStr(s);
+        return `<tr style="border-bottom:1px solid var(--border);${i%2?'background:#F8F5F2':''}">
+          <td style="padding:10px 12px">
+            <b style="color:${col};font-family:var(--mono);font-size:1rem">${s.code}</b><br>
+            <span style="font-size:.72rem;background:${isUS?'#EAE6F0':'#EDE5D5'};color:${isUS?'#6B5C8A':'#7A5C3A'};border-radius:4px;padding:1px 5px;font-weight:700">${isUS?'US':'TW'}</span>
+          </td>
+          <td style="padding:10px 12px;font-weight:600">${s.name}${dayStr?`<br><span style="font-size:.8rem;color:${gup?posC:negC};font-weight:700">${dayStr}</span>`:''}</td>
+          <td style="padding:10px 12px;text-align:right;font-family:var(--mono)">${s.sh.toLocaleString()}</td>
+          <td style="padding:10px 12px;text-align:right;font-family:var(--mono);color:var(--txt2)">${isUS?'$':'NT$'}${s.avg.toFixed(2)}</td>
+          <td style="padding:10px 12px;text-align:right;font-family:var(--mono);font-weight:700">${isUS?'$':'NT$'}${s.price.toLocaleString()}</td>
+          <td style="padding:10px 12px;text-align:right;font-family:var(--mono)">${Math.round(mv).toLocaleString()}</td>
+          <td style="padding:10px 12px;text-align:right;font-family:var(--mono);font-weight:700;color:${gup?posC:negC}">${sign(gainNTD)}${Math.abs(gainNTD).toLocaleString()}</td>
+          <td style="padding:10px 12px;text-align:right;font-weight:700;color:${gup?posC:negC}">${fmtPct(gainPct)}</td>
+          <td style="padding:10px 12px;text-align:right;color:var(--txt2);font-weight:600">${mvPct.toFixed(1)}%</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+    return;
+  }
+
+  // ── 卡片模式 ──
   grid.innerHTML=stocks.map((s,i)=>{
     const isUS=s.mkt==='US';
     const mv=s.sh*s.price*(isUS?fxRate:1);
     const mvPct=totalMV>0?mv/totalMV*100:0;
-    const gain=(s.price-s.avg)*s.sh;
-    const gainPct=s.avg>0?gain/s.avg/s.sh*100:0;
-    const gup=gain>=0;
+    const gainLocal=(s.price-s.avg)*s.sh;
+    const gainNTD=Math.round(gainLocal*(isUS?fxRate:1));
+    const gainPct=s.avg>0?(s.price-s.avg)/s.avg*100:0;
+    const gup=gainNTD>=0;
     const posC=isUS?'var(--dn)':'var(--up)';
     const negC=isUS?'var(--up)':'var(--dn)';
-    let dayStr='';
-    if(isUS){const g=dayGainUS(s);if(g!==null) dayStr=sign(g)+'$'+fmtNum(g)+'  '+fmtPct(dayChgUS(s)||0);}
-    else{const p=prevPrices[s.code];if(p&&p>0) dayStr=(s.price>=p?'+':'-')+'NT$'+fmtNum((s.price-p)*s.sh)+'  '+fmtPct((s.price-p)/p*100);}
     const color=PIE_COLORS[i%PIE_COLORS.length];
+    const dayStr=getTodayStr(s);
     return `<div class="hold-card" style="animation-delay:${i*0.06}s;border-top:4px solid ${color}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
         <div>
@@ -1141,15 +1221,15 @@ function renderHoldings(){
         </div>
         <div style="text-align:right">
           <div class="hc-price">${isUS?'$':'NT$'}${s.price.toLocaleString()}</div>
-          ${dayStr?`<div style="font-size:.9rem;font-weight:700;color:${gup?posC:negC}">${dayStr}</div>`:''}
+          ${dayStr?`<div style="font-size:.85rem;font-weight:700;color:${gup?posC:negC}">${dayStr}</div>`:''}
         </div>
       </div>
       <div class="hc-grid">
         <div class="hc-item"><label>持股數</label><span>${s.sh.toLocaleString()}</span></div>
-        <div class="hc-item"><label>成本</label><span>${isUS?'$':'NT$'}${s.avg.toLocaleString()}</span></div>
+        <div class="hc-item"><label>均價</label><span>${isUS?'$':'NT$'}${s.avg.toFixed(2)}</span></div>
         <div class="hc-item"><label>市值</label><span>NT$${Math.round(mv).toLocaleString()}</span></div>
         <div class="hc-item"><label>損益</label>
-          <span style="color:${gup?posC:negC}">${sign(gain)}${isUS?'$':'NT$'}${fmtNum(gain*Math.abs(isUS?fxRate:1))} ${fmtPct(gainPct)}</span>
+          <span style="color:${gup?posC:negC}">${sign(gainNTD)}NT$${Math.abs(gainNTD).toLocaleString()} ${fmtPct(gainPct)}</span>
         </div>
       </div>
       <div class="hc-bar-wrap"><div class="hc-bar" style="width:${mvPct.toFixed(1)}%;background:linear-gradient(90deg,${color},${color}88)"></div></div>
@@ -1178,28 +1258,71 @@ function toggleBenchmark(){
   updateHistoryChart();
 }
 
+async function loadTWHistory(){
+  try{
+    const res=await gas({action:'read',sheet:'prices_tw'});
+    if(!res.ok||!res.data?.length) return;
+    const raw=res.data[0].map(h=>String(h).trim());
+    const twiiIdx=raw.findIndex(h=>/^(\^?twii|taiex|大盤)$/i.test(h));
+    const codeMap={};
+    raw.forEach((h,i)=>{if(/^\d{4}$/.test(h)) codeMap[h]=i;});
+    const rows=res.data.slice(1).filter(r=>r[0]);
+    const twStocks=stockData.filter(s=>s.mkt==='TW');
+    if(!twStocks.length) return;
+    twHistoryData=rows.map(r=>{
+      const date=String(r[0]).slice(0,10);
+      let pv=0;
+      twStocks.forEach(s=>{
+        const ci=codeMap[s.code];
+        const p=ci!==undefined?+r[ci]||0:0;
+        if(p>0) pv+=s.sh*p;
+      });
+      const twii=twiiIdx>=0?(+r[twiiIdx]||null):null;
+      return {date,pv,twii};
+    }).filter(r=>r.date&&r.pv>0);
+    _sc('twHistoryData',twHistoryData);
+    if(currentMarket!=='US') updateHistoryChart();
+  }catch(e){console.error('loadTWHistory error:',e);}
+}
+
 function updateHistoryChart(){
   const usShow=currentMarket==='US';
   document.getElementById('us-nav-chart-wrap').style.display=usShow?'':'none';
   if(usShow){ renderUSNavChart(); return; }
   const now=new Date();
-  let rows=histMonthly;
-  if(currentRange>0){const cutoff=new Date(now);cutoff.setMonth(cutoff.getMonth()-currentRange);rows=rows.filter(r=>new Date(r[0])>=cutoff);}
-  const labels=rows.map(r=>r[0]);
-  const vals=rows.map(r=>r[1]);
+  // 優先用 prices_tw 動態日資料，fallback 靜態月資料
+  let src=twHistoryData.length
+    ? twHistoryData.map(r=>({d:r.date,v:r.pv,tw:r.twii}))
+    : histMonthly.map(r=>({d:r[0],v:r[1],tw:null}));
+  if(currentRange>0){const cutoff=new Date(now);cutoff.setMonth(cutoff.getMonth()-currentRange);src=src.filter(r=>new Date(r.d)>=cutoff);}
+  const many=src.length>120;
   const datasets=[{
     label:'投資組合 (NT$)',
-    data:vals,
+    data:src.map(r=>r.v),
     borderColor:'#7B8FA6',
     backgroundColor:'rgba(123,143,166,.10)',
-    fill:true,
-    tension:.4,
-    pointRadius:4,
+    fill:true,tension:.4,
+    pointRadius:many?0:3,
     pointBackgroundColor:'#7B8FA6',
-    pointBorderColor:'#fff',
-    pointBorderWidth:2,
+    pointBorderColor:'#fff',pointBorderWidth:1,
   }];
-  drawLineChart('lineChart',labels,datasets,'NT$');
+  if(showBenchmark){
+    const firstTW=src.find(r=>r.tw!=null)?.tw||null;
+    const firstPV=src[0]?.v||1;
+    if(firstTW){
+      datasets.push({
+        label:'大盤 TWII（同比縮放）',
+        data:src.map(r=>r.tw!=null?Math.round(firstPV*r.tw/firstTW):null),
+        borderColor:'#C4A882',
+        backgroundColor:'transparent',
+        fill:false,tension:.4,
+        pointRadius:many?0:2,
+        borderDash:[5,3],borderWidth:2,
+        spanGaps:true,
+      });
+    }
+  }
+  drawLineChart('lineChart',src.map(r=>r.d),datasets,'NT$');
 }
 
 function renderUSNavChart(){
