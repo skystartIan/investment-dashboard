@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>投資日記</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/ionicons@7.4.0/dist/ionicons/ionicons.esm.js"></script>
+<script nomodule src="https://cdn.jsdelivr.net/npm/ionicons@7.4.0/dist/ionicons/ionicons.js"></script>
 <style>
 /* ── RESET ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -49,43 +51,51 @@ body{
 #st1.ok{color:#30D158}
 #st1.err{color:#FF453A}
 
-/* ── PORTFOLIO TABS (segmented control) ── */
-#port-tabs{
-  background:#fff;
-  border-bottom:1px solid #E5E5EA;
-  padding:10px 16px;
-}
-.port-seg-wrap{
-  display:inline-flex;
-  background:#F2F2F7;border-radius:10px;padding:3px;gap:2px;
+/* ── PORTFOLIO SWITCHER (in-panel) ── */
+.port-switcher{
+  display:flex;background:#F2F2F7;border-radius:10px;
+  padding:3px;gap:2px;margin-bottom:14px;
 }
 .ps{
-  border:none;background:transparent;border-radius:8px;
-  padding:7px 22px;font-size:.92rem;font-weight:700;
-  color:#636366;cursor:pointer;transition:all .2s;white-space:nowrap;
+  flex:1;border:none;background:transparent;border-radius:8px;
+  padding:9px 16px;font-size:.95rem;font-weight:700;
+  color:#636366;cursor:pointer;transition:all .2s;text-align:center;
+  -webkit-tap-highlight-color:transparent;
 }
 .ps.on{background:#fff;color:#1C1C1E;box-shadow:0 1px 5px rgba(0,0,0,.14)}
-.ps:hover:not(.on){color:#1C1C1E}
+.ps:active:not(.on){opacity:.7}
 
 /* ── MAIN ── */
-#main{max-width:1200px;margin:0 auto;padding:14px 16px}
+#main{max-width:1200px;margin:0 auto;padding:14px 16px calc(76px + env(safe-area-inset-bottom))}
 
-/* ── SECTION TABS ── */
-#sect-nav{
-  display:flex;gap:0;margin-bottom:14px;
-  border-bottom:1px solid #E5E5EA;
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
-  scrollbar-width:none;
+/* ── BOTTOM NAV ── */
+#bottom-nav{
+  position:fixed;bottom:0;left:0;right:0;z-index:200;
+  background:rgba(255,255,255,.95);
+  backdrop-filter:saturate(180%) blur(20px);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-top:1px solid rgba(0,0,0,.1);
+  display:flex;
+  padding:0 0 env(safe-area-inset-bottom);
 }
-#sect-nav::-webkit-scrollbar{display:none}
-.st{
-  padding:9px 16px;font-size:.88rem;font-weight:600;
-  color:#636366;cursor:pointer;white-space:nowrap;
-  border-bottom:2px solid transparent;transition:all .18s;
+.bn{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  gap:3px;padding:9px 4px 7px;
+  background:none;border:none;cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  transition:opacity .1s;
 }
-.st.on{color:#007AFF;border-bottom-color:#007AFF}
-.st:hover:not(.on){color:#1C1C1E}
+.bn:active{opacity:.6}
+.bn svg{
+  width:25px;height:25px;stroke:#8E8E93;fill:none;
+  stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;
+  transition:stroke .15s;
+}
+.bn ion-icon{font-size:25px;color:#8E8E93;transition:color .15s}
+.bn span{font-size:.66rem;font-weight:600;color:#8E8E93;transition:color .15s;letter-spacing:.1px}
+.bn.on svg{stroke:#007AFF}
+.bn.on ion-icon{color:#007AFF}
+.bn.on span{color:#007AFF;font-weight:700}
 
 /* ── PANELS ── */
 .panel{display:none}
@@ -361,7 +371,7 @@ body{
 @media(max-width:860px){
   .hs-body{grid-template-columns:1fr}
   .hs-left{border-right:none;border-bottom:1px solid #F2F2F7}
-  .hs-chart-wrap{min-height:200px}
+  .hs-chart-wrap{min-height:260px}
 }
 
 /* ── MOBILE (≤680px) ── */
@@ -370,13 +380,11 @@ body{
   .hdr-right{gap:6px}
   .hdr-breadcrumb{font-size:.82rem}
   #main{padding:10px 10px}
-  .st{padding:8px 11px;font-size:.82rem}
-  .pt{padding:10px 14px;font-size:.85rem}
-  #port-tabs{padding:0 10px}
   .hs-left{padding:14px 14px}
   .hs-right{padding:12px 14px}
   .hs-nav{font-size:1.6rem}
-  .hs-chart-wrap{min-height:160px}
+  .hs-chart-wrap{min-height:260px}
+  #main{padding:10px 10px calc(76px + env(safe-area-inset-bottom))}
   .sc-hdr{padding:11px 14px}
   .sc-btn{padding:4px 10px;font-size:.74rem}
   .si{padding:11px 14px;gap:10px}
@@ -410,7 +418,7 @@ body{
   .hs-bar-labels{flex-direction:column;gap:5px}
   .hs-periods{gap:2px}
   .hs-period{padding:3px 7px;font-size:.74rem}
-  .hs-chart-wrap{min-height:150px}
+  .hs-chart-wrap{min-height:260px}
   .hs-mrow{font-size:.82rem}
   .hs-mval{font-size:.88rem}
 
@@ -539,23 +547,13 @@ body{
   </div>
 </div>
 
-<!-- ════ PORTFOLIO TABS ════ -->
-<div id="port-tabs">
-  <div class="port-seg-wrap">
-    <button class="ps on" id="pt-TW" onclick="setPortfolio('TW')">台股</button>
-    <button class="ps"    id="pt-US" onclick="setPortfolio('US')">美股</button>
-  </div>
-</div>
-
 <!-- ════ MAIN ════ -->
 <div id="main">
 
-  <!-- Section Tabs -->
-  <div id="sect-nav">
-    <div class="st on" onclick="sw('overview')">📊 總覽</div>
-    <div class="st" onclick="sw('dividends')">💰 股利</div>
-    <div class="st" onclick="sw('lending')">🏦 借券</div>
-    <div class="st" onclick="sw('trade')">🔄 交易</div>
+  <!-- Portfolio Switcher -->
+  <div class="port-switcher">
+    <button class="ps on" id="pt-TW" onclick="setPortfolio('TW')">🇹🇼 台股</button>
+    <button class="ps"    id="pt-US" onclick="setPortfolio('US')">🇺🇸 美股</button>
   </div>
 
   <!-- ═══ OVERVIEW PANEL ═══ -->
@@ -1116,7 +1114,10 @@ async function loadTWHistory(){
 ════════════════════════════════════════════ */
 function sw(id){
   const panels=['overview','dividends','lending','trade'];
-  document.querySelectorAll('.st').forEach((t,i)=>t.classList.toggle('on',panels[i]===id));
+  panels.forEach(p=>{
+    const btn=document.getElementById('bn-'+p);
+    if(btn)btn.classList.toggle('on',p===id);
+  });
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.getElementById('panel-'+id).classList.add('on');
   if(id==='dividends')renderDividends();
@@ -1528,34 +1529,38 @@ function renderHsSummaryChart(){
         const color=isPos?'#8B7FD4':'#FF3B30';
         const PAD=6,BH=20;
 
-        // ── Always: dot + badge at last point ──
-        const meta0=chart.getDatasetMeta(0);
-        const lastPt=meta0.data[meta0.data.length-1];
-        const lastV=ds.data[ds.data.length-1];
-        if(lastPt&&lastV!=null){
-          ctx.save();
-          ctx.fillStyle=color;
-          ctx.beginPath();
-          ctx.arc(lastPt.x,lastPt.y,4,0,Math.PI*2);ctx.fill();
-          ctx.fillStyle='#fff';
-          ctx.beginPath();
-          ctx.arc(lastPt.x,lastPt.y,2,0,Math.PI*2);ctx.fill();
+        // ── Always: dot + badge at last point for each dataset ──
+        ctx.save();
+        ctx.font='bold 11px -apple-system,sans-serif';
+        chart.data.datasets.forEach((dset,di)=>{
+          const meta=chart.getDatasetMeta(di);
+          if(!meta.data.length)return;
+          const lastPt=meta.data[meta.data.length-1];
+          const validVals=dset.data.filter(v=>v!=null);
+          const lastV=validVals[validVals.length-1];
+          if(!lastPt||lastV==null)return;
+          const badgeColor=di===0?color:dset.borderColor;
+          if(di===0){
+            ctx.fillStyle=color;
+            ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,4,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle='#fff';
+            ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,2,0,Math.PI*2);ctx.fill();
+          }
           const lbl=(lastV>=0?'+':'')+lastV.toFixed(2)+'%';
-          ctx.font='bold 11px -apple-system,sans-serif';
           const tw=ctx.measureText(lbl).width;
           const bx=right+4,by=lastPt.y;
-          ctx.fillStyle=color;
-          ctx.beginPath();
-          ctx.roundRect(bx,by-BH/2,tw+PAD*2,BH,4);ctx.fill();
+          ctx.fillStyle=badgeColor;
+          ctx.beginPath();ctx.roundRect(bx,by-BH/2,tw+PAD*2,BH,4);ctx.fill();
           ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
           ctx.fillText(lbl,bx+PAD,by);
-          ctx.restore();
-        }
+        });
+        ctx.restore();
 
         // ── On hover: crosshair ──
         const active=chart.tooltip?._active;
         if(!active?.length)return;
         const idx=active[0].index;
+        const meta0=chart.getDatasetMeta(0);
         const ptX=meta0.data[idx]?.x;
         if(ptX==null)return;
         ctx.save();
@@ -1580,17 +1585,21 @@ function renderHsSummaryChart(){
         ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
         ctx.fillText(dateStr,dbx+PAD,bottom+4+BH/2);
 
-        // Hover value badge on Y-axis
-        const hv=ds.data[idx];
-        if(hv!=null){
-          const hpt=meta0.data[idx];
+        // Hover value badges for all datasets
+        chart.data.datasets.forEach((dset,di)=>{
+          const meta=chart.getDatasetMeta(di);
+          const hv=dset.data[idx];
+          if(hv==null)return;
+          const hpt=meta.data[idx];
+          if(!hpt)return;
+          const badgeColor=di===0?'#3A3A3C':dset.borderColor;
           const hvLbl=(hv>=0?'+':'')+hv.toFixed(2)+'%';
           const hvtw=ctx.measureText(hvLbl).width;
-          ctx.fillStyle='#3A3A3C';
+          ctx.fillStyle=badgeColor;
           ctx.beginPath();ctx.roundRect(right+4,hpt.y-BH/2,hvtw+PAD*2,BH,4);ctx.fill();
           ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
           ctx.fillText(hvLbl,right+4+PAD,hpt.y);
-        }
+        });
         ctx.restore();
       }
     }]
@@ -1818,6 +1827,40 @@ async function renderTrades(){
 
 /* BOOT */
 renderOverview();
+
+/* ════ SWIPE: 左右滑切換台股/美股 ════ */
+(()=>{
+  let tx=0,ty=0;
+  const el=document.getElementById('main');
+  el.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
+  el.addEventListener('touchend',e=>{
+    const dx=e.changedTouches[0].clientX-tx;
+    const dy=e.changedTouches[0].clientY-ty;
+    if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.5){
+      setPortfolio(dx<0?'US':'TW');
+    }
+  },{passive:true});
+})();
 </script>
+
+<!-- ════ BOTTOM NAV ════ -->
+<nav id="bottom-nav">
+  <button class="bn on" id="bn-overview" onclick="sw('overview')">
+    <ion-icon name="bar-chart-outline"></ion-icon>
+    <span>總覽</span>
+  </button>
+  <button class="bn" id="bn-dividends" onclick="sw('dividends')">
+    <ion-icon name="cash-outline"></ion-icon>
+    <span>股利</span>
+  </button>
+  <button class="bn" id="bn-lending" onclick="sw('lending')">
+    <svg viewBox="0 0 24 24"><path d="M3 21h18M3 10h18M5 6l7-3 7 3M4 10v11M20 10v11M8 10v11M16 10v11M12 10v11"/></svg>
+    <span>借券</span>
+  </button>
+  <button class="bn" id="bn-trade" onclick="sw('trade')">
+    <svg viewBox="0 0 24 24"><path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/></svg>
+    <span>交易</span>
+  </button>
+</nav>
 </body>
 </html>
