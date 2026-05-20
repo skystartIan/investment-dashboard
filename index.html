@@ -181,18 +181,23 @@ body{
 
 /* RIGHT */
 .hs-right{
-  padding:10px 14px;display:flex;flex-direction:column;
+  padding:0;display:flex;flex-direction:column;min-height:300px;
 }
-.hs-periods{display:flex;gap:3px;margin-bottom:5px;flex-wrap:wrap}
+.hs-chart-wrap{flex:1;position:relative;min-height:300px}
+.hs-periods{
+  position:absolute;top:8px;left:10px;right:10px;z-index:2;
+  display:flex;gap:3px;flex-wrap:wrap;pointer-events:all;
+}
 .hs-period{
-  border:none;background:transparent;
+  border:none;background:rgba(242,242,247,.85);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
   padding:4px 8px;border-radius:6px;
   font-size:.8rem;font-weight:700;
   cursor:pointer;color:#636366;transition:all .15s;
+  -webkit-tap-highlight-color:transparent;
 }
 .hs-period.on{background:#EAF3FF;color:#007AFF}
-.hs-period:hover:not(.on){background:#F2F2F7}
-.hs-chart-wrap{flex:1;position:relative;min-height:220px}
+.hs-period:active:not(.on){opacity:.7}
 
 /* ── SECTION CARD ── */
 .sc{
@@ -371,7 +376,8 @@ body{
 @media(max-width:860px){
   .hs-body{grid-template-columns:1fr}
   .hs-left{border-right:none;border-bottom:1px solid #F2F2F7}
-  .hs-chart-wrap{min-height:260px}
+  .hs-right{min-height:300px}
+  .hs-chart-wrap{min-height:300px}
 }
 
 /* ── MOBILE (≤680px) ── */
@@ -552,8 +558,8 @@ body{
 
   <!-- Portfolio Switcher -->
   <div class="port-switcher">
-    <button class="ps on" id="pt-TW" onclick="setPortfolio('TW')">🇹🇼 台股</button>
-    <button class="ps"    id="pt-US" onclick="setPortfolio('US')">🇺🇸 美股</button>
+    <button class="ps on" id="pt-TW" onclick="setPortfolio('TW')">台股</button>
+    <button class="ps"    id="pt-US" onclick="setPortfolio('US')">美股</button>
   </div>
 
   <!-- ═══ OVERVIEW PANEL ═══ -->
@@ -612,19 +618,19 @@ body{
 
         <!-- RIGHT: chart -->
         <div class="hs-right">
-          <div class="hs-periods">
-            <button class="hs-period" onclick="hsSetPeriod('1D',this)">1D</button>
-            <button class="hs-period" onclick="hsSetPeriod('5D',this)">5D</button>
-            <button class="hs-period" onclick="hsSetPeriod('1M',this)">1M</button>
-            <button class="hs-period on" onclick="hsSetPeriod('6M',this)">6M</button>
-            <button class="hs-period" onclick="hsSetPeriod('YTD',this)">YTD</button>
-            <button class="hs-period" onclick="hsSetPeriod('1Y',this)">1Y</button>
-            <button class="hs-period" onclick="hsSetPeriod('ALL',this)">All</button>
-            <span id="hs-bench-area" style="margin-left:auto;display:flex;gap:4px">
-              <button class="hs-period" id="hs-bench-btn" onclick="toggleHsBench()">＋大盤</button>
-            </span>
-          </div>
           <div class="hs-chart-wrap">
+            <div class="hs-periods">
+              <button class="hs-period" onclick="hsSetPeriod('1D',this)">1D</button>
+              <button class="hs-period" onclick="hsSetPeriod('5D',this)">5D</button>
+              <button class="hs-period" onclick="hsSetPeriod('1M',this)">1M</button>
+              <button class="hs-period on" onclick="hsSetPeriod('6M',this)">6M</button>
+              <button class="hs-period" onclick="hsSetPeriod('YTD',this)">YTD</button>
+              <button class="hs-period" onclick="hsSetPeriod('1Y',this)">1Y</button>
+              <button class="hs-period" onclick="hsSetPeriod('ALL',this)">All</button>
+              <span id="hs-bench-area" style="margin-left:auto;display:flex;gap:4px">
+                <button class="hs-period" id="hs-bench-btn" onclick="toggleHsBench()">＋大盤</button>
+              </span>
+            </div>
             <canvas id="hsSummaryChart"></canvas>
           </div>
         </div>
@@ -1490,6 +1496,7 @@ function renderHsSummaryChart(){
     type:'line',data:{labels,datasets},
     options:{
       responsive:true,maintainAspectRatio:false,
+      layout:{padding:{top:40,right:0,bottom:4,left:0}},
       plugins:{
         legend:{display:false},
         tooltip:{enabled:false,mode:'index',intersect:false}
@@ -1527,56 +1534,77 @@ function renderHsSummaryChart(){
         if(!ds||!ds.data.length)return;
         const {ctx,chartArea:{top,bottom,left,right}}=chart;
         const color=isPos?'#8B7FD4':'#FF3B30';
-        const PAD=6,BH=20;
+        const PAD=6,BH=20,GAP=3;
 
-        // ── Always: dot + badge at last point for each dataset ──
+        function spreadBadges(badges){
+          badges.sort((a,b)=>a.y-b.y);
+          for(let i=1;i<badges.length;i++){
+            const minY=badges[i-1].y+BH+GAP;
+            if(badges[i].y<minY)badges[i].y=minY;
+          }
+          badges.forEach(b=>{b.y=Math.max(top+BH/2,Math.min(bottom-BH/2,b.y));});
+          return badges;
+        }
+
         ctx.save();
         ctx.font='bold 11px -apple-system,sans-serif';
+
+        const active=chart.tooltip?._active;
+        const isHovering=active?.length>0;
+
+        // ── Always: dots at end of each line (visible regardless of hover) ──
+        const lastBadges=[];
         chart.data.datasets.forEach((dset,di)=>{
           const meta=chart.getDatasetMeta(di);
-          if(!meta.data.length)return;
-          const lastPt=meta.data[meta.data.length-1];
-          const validVals=dset.data.filter(v=>v!=null);
-          const lastV=validVals[validVals.length-1];
+          // Find last non-null data index
+          let lastIdx=-1;
+          for(let i=dset.data.length-1;i>=0;i--){if(dset.data[i]!=null){lastIdx=i;break;}}
+          if(lastIdx<0)return;
+          const lastPt=meta.data[lastIdx];
+          const lastV=dset.data[lastIdx];
           if(!lastPt||lastV==null)return;
-          const badgeColor=di===0?color:dset.borderColor;
-          if(di===0){
-            ctx.fillStyle=color;
-            ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,4,0,Math.PI*2);ctx.fill();
-            ctx.fillStyle='#fff';
-            ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,2,0,Math.PI*2);ctx.fill();
-          }
-          const lbl=(lastV>=0?'+':'')+lastV.toFixed(2)+'%';
-          const tw=ctx.measureText(lbl).width;
-          const bx=right+4,by=lastPt.y;
-          ctx.fillStyle=badgeColor;
-          ctx.beginPath();ctx.roundRect(bx,by-BH/2,tw+PAD*2,BH,4);ctx.fill();
-          ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
-          ctx.fillText(lbl,bx+PAD,by);
+          const dc=di===0?color:dset.borderColor;
+          const dotR=di===0?4:3.5;
+          ctx.fillStyle=dc;
+          ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,dotR,0,Math.PI*2);ctx.fill();
+          ctx.fillStyle='#fff';
+          ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,di===0?2:1.5,0,Math.PI*2);ctx.fill();
+          lastBadges.push({
+            y:lastPt.y,lbl:(lastV>=0?'+':'')+lastV.toFixed(2)+'%',
+            color:dc
+          });
         });
-        ctx.restore();
 
-        // ── On hover: crosshair ──
-        const active=chart.tooltip?._active;
-        if(!active?.length)return;
+        // Last-point badges: only when NOT hovering
+        if(!isHovering){
+          spreadBadges(lastBadges);
+          lastBadges.forEach(({y,lbl,color:bc})=>{
+            const tw=ctx.measureText(lbl).width;
+            ctx.fillStyle=bc;
+            ctx.beginPath();ctx.roundRect(right+4,y-BH/2,tw+PAD*2,BH,4);ctx.fill();
+            ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
+            ctx.fillText(lbl,right+4+PAD,y);
+          });
+        }
+
+        // ── On hover: crosshair + hover badges only ──
+        if(!active?.length){ctx.restore();return;}
         const idx=active[0].index;
         const meta0=chart.getDatasetMeta(0);
         const ptX=meta0.data[idx]?.x;
-        if(ptX==null)return;
-        ctx.save();
+        if(ptX==null){ctx.restore();return;}
 
         // Vertical dashed line
         ctx.beginPath();ctx.moveTo(ptX,top);ctx.lineTo(ptX,bottom);
         ctx.lineWidth=1;ctx.strokeStyle='rgba(100,100,100,.45)';
         ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
 
-        // Date badge at bottom
+        // Date badge
         const raw=chart.data.labels[idx];
         const d=new Date(raw);
         const dateStr=isNaN(d)?raw:
           (d.getMonth()+1).toString().padStart(2,'0')+'/'+
           d.getDate().toString().padStart(2,'0')+'/'+d.getFullYear();
-        ctx.font='bold 11px -apple-system,sans-serif';
         const dtw=ctx.measureText(dateStr).width;
         const dbw=dtw+PAD*2;
         const dbx=Math.min(Math.max(ptX-dbw/2,left),right-dbw);
@@ -1585,20 +1613,27 @@ function renderHsSummaryChart(){
         ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
         ctx.fillText(dateStr,dbx+PAD,bottom+4+BH/2);
 
-        // Hover value badges for all datasets
+        // Hover badges
+        const hoverBadges=[];
         chart.data.datasets.forEach((dset,di)=>{
           const meta=chart.getDatasetMeta(di);
           const hv=dset.data[idx];
           if(hv==null)return;
           const hpt=meta.data[idx];
           if(!hpt)return;
-          const badgeColor=di===0?'#3A3A3C':dset.borderColor;
-          const hvLbl=(hv>=0?'+':'')+hv.toFixed(2)+'%';
-          const hvtw=ctx.measureText(hvLbl).width;
-          ctx.fillStyle=badgeColor;
-          ctx.beginPath();ctx.roundRect(right+4,hpt.y-BH/2,hvtw+PAD*2,BH,4);ctx.fill();
+          hoverBadges.push({
+            y:hpt.y,
+            lbl:(hv>=0?'+':'')+hv.toFixed(2)+'%',
+            color:di===0?'#3A3A3C':dset.borderColor
+          });
+        });
+        spreadBadges(hoverBadges);
+        hoverBadges.forEach(({y,lbl,color:bc})=>{
+          const hvtw=ctx.measureText(lbl).width;
+          ctx.fillStyle=bc;
+          ctx.beginPath();ctx.roundRect(right+4,y-BH/2,hvtw+PAD*2,BH,4);ctx.fill();
           ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
-          ctx.fillText(hvLbl,right+4+PAD,hpt.y);
+          ctx.fillText(lbl,right+4+PAD,y);
         });
         ctx.restore();
       }
@@ -1845,10 +1880,6 @@ renderOverview();
 
 <!-- ════ BOTTOM NAV ════ -->
 <nav id="bottom-nav">
-  <button class="bn on" id="bn-overview" onclick="sw('overview')">
-    <ion-icon name="bar-chart-outline"></ion-icon>
-    <span>總覽</span>
-  </button>
   <button class="bn" id="bn-dividends" onclick="sw('dividends')">
     <ion-icon name="cash-outline"></ion-icon>
     <span>股利</span>
@@ -1860,6 +1891,10 @@ renderOverview();
   <button class="bn" id="bn-trade" onclick="sw('trade')">
     <svg viewBox="0 0 24 24"><path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/></svg>
     <span>交易</span>
+  </button>
+  <button class="bn on" id="bn-overview" onclick="sw('overview')">
+    <ion-icon name="bar-chart-outline"></ion-icon>
+    <span>總覽</span>
   </button>
 </nav>
 </body>
