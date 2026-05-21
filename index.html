@@ -178,6 +178,8 @@ body{
   font-size:1.05rem;
 }
 .hs-mpct{font-size:.88rem;margin-left:3px;font-weight:700}
+.hs-fx-equiv{display:block;font-size:.78rem;color:#8E8E93;margin-top:1px;font-weight:500}
+.hs-nav-ntd{font-size:.88rem;color:#8E8E93;font-weight:600;margin-top:-6px;margin-bottom:10px;letter-spacing:-.2px}
 
 /* RIGHT */
 .hs-right{
@@ -575,6 +577,7 @@ body{
         <!-- LEFT: metrics -->
         <div class="hs-left">
           <div class="hs-nav" id="hs-nav">--</div>
+          <div class="hs-nav-ntd" id="hs-nav-ntd"></div>
 
           <div class="hs-bar-section">
             <div class="hs-bar-track">
@@ -604,6 +607,7 @@ body{
               <div class="hs-mval-wrap">
                 <span class="hs-mval" id="hs-day-chg">--</span>
                 <span class="hs-mpct" id="hs-day-pct"></span>
+                <span class="hs-fx-equiv" id="hs-day-chg-ntd"></span>
               </div>
             </div>
             <div class="hs-mrow">
@@ -611,6 +615,7 @@ body{
               <div class="hs-mval-wrap">
                 <span class="hs-mval" id="hs-unreal">--</span>
                 <span class="hs-mpct" id="hs-unreal-pct"></span>
+                <span class="hs-fx-equiv" id="hs-unreal-ntd"></span>
               </div>
             </div>
           </div>
@@ -1205,6 +1210,9 @@ function renderHsSummaryMetrics(){
 
   // NAV
   document.getElementById('hs-nav').textContent=fmtN(nav,curr);
+  const navNtdEl=document.getElementById('hs-nav-ntd');
+  if(isUS){ navNtdEl.textContent='≈ NT$'+Math.round(nav*fxRate).toLocaleString(); }
+  else { navNtdEl.textContent=''; }
 
   // Bar
   const mvBar=isUS&&ibCashUSD<0?mv/(mv+Math.abs(ibCashUSD))*100:70;
@@ -1219,7 +1227,7 @@ function renderHsSummaryMetrics(){
   const dc=document.getElementById('hs-day-chg');
   const dp=document.getElementById('hs-day-pct');
   if(hasPrev&&mv>0){
-    dc.textContent=(dayChg>=0?'+':'-')+'NT$'+Math.abs(Math.round(dayChg)).toLocaleString();
+    dc.textContent=(dayChg>=0?'+':'-')+curr+Math.abs(Math.round(dayChg)).toLocaleString();
     dc.className='hs-mval '+pc(dayChg);
     const pctDc=dayChg/(mv-dayChg)*100;
     dp.textContent=' ('+fmtPct(pctDc)+')';
@@ -1227,15 +1235,23 @@ function renderHsSummaryMetrics(){
   } else {
     dc.textContent='--';dc.className='hs-mval neu';dp.textContent='';
   }
+  const dcNtd=document.getElementById('hs-day-chg-ntd');
+  if(isUS&&hasPrev&&mv>0){
+    dcNtd.textContent='≈ '+(dayChg>=0?'+':'-')+'NT$'+Math.abs(Math.round(dayChg*fxRate)).toLocaleString();
+  } else { dcNtd.textContent=''; }
 
   // Unrealized G/L
   const ur=document.getElementById('hs-unreal');
   const up=document.getElementById('hs-unreal-pct');
-  ur.textContent=(unrealized>=0?'+':'-')+'NT$'+Math.abs(Math.round(unrealized)).toLocaleString();
+  ur.textContent=(unrealized>=0?'+':'-')+curr+Math.abs(Math.round(unrealized)).toLocaleString();
   ur.className='hs-mval '+pc(unrealized);
   const retPct=cost>0?unrealized/cost*100:0;
   up.textContent=' ('+fmtPct(retPct)+')';
   up.className='hs-mpct '+pc(unrealized);
+  const urNtd=document.getElementById('hs-unreal-ntd');
+  if(isUS){
+    urNtd.textContent='≈ '+(unrealized>=0?'+':'-')+'NT$'+Math.abs(Math.round(unrealized*fxRate)).toLocaleString();
+  } else { urNtd.textContent=''; }
 
 
   renderBenchmarkButtons();
