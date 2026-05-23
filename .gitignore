@@ -1,0 +1,14 @@
+# 敏感設定
+.env
+*.json
+
+# 暫存資料
+downloads/
+captcha_db/
+__pycache__/
+*.pyc
+*.log
+*.crdownload
+
+# 暫存
+*.tmp
