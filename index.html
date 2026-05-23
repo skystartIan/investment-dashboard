@@ -189,6 +189,11 @@ body{
 .hs-periods{
   position:absolute;top:8px;left:10px;right:10px;z-index:2;
   display:flex;gap:3px;flex-wrap:wrap;pointer-events:all;
+  align-items:flex-start;
+}
+#hs-bench-area{display:flex;gap:3px;flex-wrap:wrap;margin-left:auto;}
+@media(max-width:480px){
+  #hs-bench-area{flex-basis:100%;margin-left:0;margin-top:2px;}
 }
 .hs-period{
   border:none;background:rgba(242,242,247,.85);
@@ -625,11 +630,9 @@ body{
         <div class="hs-right">
           <div class="hs-chart-wrap">
             <div class="hs-periods">
-              <button class="hs-period" onclick="hsSetPeriod('1D',this)">1D</button>
-              <button class="hs-period" onclick="hsSetPeriod('5D',this)">5D</button>
               <button class="hs-period" onclick="hsSetPeriod('1M',this)">1M</button>
-              <button class="hs-period on" onclick="hsSetPeriod('6M',this)">6M</button>
-              <button class="hs-period" onclick="hsSetPeriod('YTD',this)">YTD</button>
+              <button class="hs-period" onclick="hsSetPeriod('6M',this)">6M</button>
+              <button class="hs-period on" onclick="hsSetPeriod('YTD',this)">YTD</button>
               <button class="hs-period" onclick="hsSetPeriod('1Y',this)">1Y</button>
               <button class="hs-period" onclick="hsSetPeriod('ALL',this)">All</button>
               <span id="hs-bench-area" style="margin-left:auto;display:flex;gap:4px">
@@ -788,7 +791,7 @@ let currentRange=3;
 let showBenchmark=false, showHsBench=false;
 let usBenchQQQ=false, usBenchSPY=false, usBenchNASDAQ=false;
 let lineChartInst=null,usNavChartInst=null,hsSummaryChartInst=null;
-let hsPeriodMode='6M';
+let hsPeriodMode='YTD';
 let divYearFilter='2026';
 let tradeFilter='all';
 let allTrades=[],usTradesData=[];
@@ -1432,13 +1435,13 @@ function renderHsSummaryChart(){
     if(!rows.length){clearHsChart();return;}
     // Normalize to period start so portfolio and benchmarks share the same 0% baseline
     const basePct=rows[0].pct;
-    src=rows.map(r=>({d:r.d,pct:+(r.pct-basePct).toFixed(4)}));
+    src=rows.map(r=>({d:r.d,pct:+(r.pct-basePct).toFixed(4),absVal:r.navUSD||null}));
   } else {
     let rows=twHistoryData.length?twHistoryData:histMonthly.map(r=>({date:r[0],pv:r[1],twii:null}));
     rows=cutByPeriod(rows,'date');
     if(!rows.length){clearHsChart();return;}
     const base=rows[0].pv;
-    src=rows.map(r=>({d:r.date,pct:base>0?(r.pv-base)/base*100:0,twii:r.twii}));
+    src=rows.map(r=>({d:r.date,pct:base>0?(r.pv-base)/base*100:0,twii:r.twii,absVal:r.pv||null}));
   }
 
   const labels=src.map(r=>r.d);
@@ -1522,11 +1525,11 @@ function renderHsSummaryChart(){
           grid:{display:false},border:{display:false},
           ticks:{
             color:'#8E8E93',font:{size:11},
-            maxTicksLimit:['1D','5D','1M'].includes(hsPeriodMode)?10:7,
+            maxTicksLimit:hsPeriodMode==='1M'?10:7,
             callback(v){
               const d=new Date(this.getLabelForValue(v));
               if(isNaN(d))return '';
-              if(['1D','5D','1M'].includes(hsPeriodMode)){
+              if(hsPeriodMode==='1M'){
                 return (d.getMonth()+1)+'/'+(d.getDate());
               }
               const mon=d.toLocaleDateString('en-US',{month:'short'});
@@ -1550,16 +1553,38 @@ function renderHsSummaryChart(){
         if(!ds||!ds.data.length)return;
         const {ctx,chartArea:{top,bottom,left,right}}=chart;
         const color=isPos?'#8B7FD4':'#FF3B30';
-        const PAD=6,BH=20,GAP=3;
+        const PAD=6,BH=20,BH2=34,GAP=3;
+        const fmtAbs=v=>mkt==='US'?'USD '+Math.round(v).toLocaleString():'NT$'+Math.round(v).toLocaleString();
 
         function spreadBadges(badges){
           badges.sort((a,b)=>a.y-b.y);
           for(let i=1;i<badges.length;i++){
-            const minY=badges[i-1].y+BH+GAP;
+            const ph=(badges[i-1].bh||BH), ch=(badges[i].bh||BH);
+            const minY=badges[i-1].y+ph/2+GAP+ch/2;
             if(badges[i].y<minY)badges[i].y=minY;
           }
-          badges.forEach(b=>{b.y=Math.max(top+BH/2,Math.min(bottom-BH/2,b.y));});
+          badges.forEach(b=>{const bh=b.bh||BH;b.y=Math.max(top+bh/2,Math.min(bottom-bh/2,b.y));});
           return badges;
+        }
+
+        function drawBadge(x,y,lbl,sub,bc){
+          const bh=sub?BH2:BH;
+          ctx.font='bold 11px -apple-system,sans-serif';
+          const tw=ctx.measureText(lbl).width;
+          let sw=0;
+          if(sub){ctx.font='10px -apple-system,sans-serif';sw=ctx.measureText(sub).width;ctx.font='bold 11px -apple-system,sans-serif';}
+          const bw=Math.max(tw,sw)+PAD*2;
+          ctx.fillStyle=bc;
+          ctx.beginPath();ctx.roundRect(x,y-bh/2,bw,bh,4);ctx.fill();
+          ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
+          if(sub){
+            ctx.fillText(lbl,x+PAD,y-7);
+            ctx.font='10px -apple-system,sans-serif';
+            ctx.fillText(sub,x+PAD,y+7);
+            ctx.font='bold 11px -apple-system,sans-serif';
+          } else {
+            ctx.fillText(lbl,x+PAD,y);
+          }
         }
 
         ctx.save();
@@ -1585,22 +1610,17 @@ function renderHsSummaryChart(){
           ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,dotR,0,Math.PI*2);ctx.fill();
           ctx.fillStyle='#fff';
           ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,di===0?2:1.5,0,Math.PI*2);ctx.fill();
+          const absV=di===0&&src[lastIdx]?.absVal!=null?fmtAbs(src[lastIdx].absVal):null;
           lastBadges.push({
             y:lastPt.y,lbl:(lastV>=0?'+':'')+lastV.toFixed(2)+'%',
-            color:dc
+            sub:absV,bh:absV?BH2:BH,color:dc
           });
         });
 
         // Last-point badges: only when NOT hovering
         if(!isHovering){
           spreadBadges(lastBadges);
-          lastBadges.forEach(({y,lbl,color:bc})=>{
-            const tw=ctx.measureText(lbl).width;
-            ctx.fillStyle=bc;
-            ctx.beginPath();ctx.roundRect(right+4,y-BH/2,tw+PAD*2,BH,4);ctx.fill();
-            ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
-            ctx.fillText(lbl,right+4+PAD,y);
-          });
+          lastBadges.forEach(({y,lbl,sub,color:bc})=>{drawBadge(right+4,y,lbl,sub,bc);});
         }
 
         // ── On hover: crosshair + hover badges only ──
@@ -1637,20 +1657,16 @@ function renderHsSummaryChart(){
           if(hv==null)return;
           const hpt=meta.data[idx];
           if(!hpt)return;
+          const absV=di===0&&src[idx]?.absVal!=null?fmtAbs(src[idx].absVal):null;
           hoverBadges.push({
             y:hpt.y,
             lbl:(hv>=0?'+':'')+hv.toFixed(2)+'%',
+            sub:absV,bh:absV?BH2:BH,
             color:di===0?'#3A3A3C':dset.borderColor
           });
         });
         spreadBadges(hoverBadges);
-        hoverBadges.forEach(({y,lbl,color:bc})=>{
-          const hvtw=ctx.measureText(lbl).width;
-          ctx.fillStyle=bc;
-          ctx.beginPath();ctx.roundRect(right+4,y-BH/2,hvtw+PAD*2,BH,4);ctx.fill();
-          ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
-          ctx.fillText(lbl,right+4+PAD,y);
-        });
+        hoverBadges.forEach(({y,lbl,sub,color:bc})=>{drawBadge(right+4,y,lbl,sub,bc);});
         ctx.restore();
       }
     }]
