@@ -532,6 +532,23 @@ body{
 ::-webkit-scrollbar-track{background:#F2F2F7}
 ::-webkit-scrollbar-thumb{background:#C7C7CC;border-radius:3px}
 
+/* ── HOLDINGS TAB PILLS ── */
+.hld-tabs{
+  display:flex;background:#F2F2F7;border-radius:10px;
+  padding:3px;gap:2px;margin:0 16px 0;
+}
+.hld-tab{
+  flex:1;border:none;background:transparent;border-radius:8px;
+  padding:8px 10px;font-size:.88rem;font-weight:700;
+  color:#636366;cursor:pointer;
+  transition:background .18s,color .18s,box-shadow .18s;
+  -webkit-tap-highlight-color:transparent;text-align:center;
+}
+.hld-tab.on{background:#fff;color:#1C1C1E;box-shadow:0 1px 5px rgba(0,0,0,.13)}
+.hld-tab:active:not(.on){opacity:.7}
+@keyframes hldFadeIn{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+.hld-fade{animation:hldFadeIn .14s ease}
+
 /* ── HOLDINGS SORTABLE TABLE ── */
 .hld-wrap{
   overflow-x:auto;overflow-y:auto;max-height:520px;
@@ -539,7 +556,7 @@ body{
 }
 .hld-wrap::-webkit-scrollbar{width:4px;height:4px}
 .hld-wrap::-webkit-scrollbar-thumb{background:#C7C7CC;border-radius:2px}
-.hld-tbl{width:100%;border-collapse:collapse;min-width:900px}
+.hld-tbl{width:100%;border-collapse:collapse;min-width:0}
 .hld-tbl thead tr{position:sticky;top:0;z-index:2}
 .hld-tbl th{
   font-size:.75rem;font-weight:800;color:#48484A;
@@ -687,24 +704,16 @@ body{
       <div class="sc-hdr">
         <div class="sc-title">持倉明細</div>
       </div>
+      <div class="hld-tabs" style="margin-bottom:10px;margin-top:12px">
+        <button class="hld-tab on" data-tab="today" onclick="switchHoldingsTab('today')">今日</button>
+        <button class="hld-tab" data-tab="pnl" onclick="switchHoldingsTab('pnl')">損益</button>
+        <button class="hld-tab" data-tab="alloc" onclick="switchHoldingsTab('alloc')">佔比</button>
+      </div>
       <div class="hld-wrap">
         <table class="hld-tbl">
-          <thead><tr>
-            <th class="l" data-col="name" onclick="sortHoldings('name')">投資產品<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="sh" onclick="sortHoldings('sh')">持倉<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="dayPct" onclick="sortHoldings('dayPct')">變化%<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="dayAmt" onclick="sortHoldings('dayAmt')">盈虧$<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="avg" onclick="sortHoldings('avg')">平均價格<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="price" onclick="sortHoldings('price')">最後價<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="unreal" onclick="sortHoldings('unreal')">未實現盈虧$<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="unrealPct" onclick="sortHoldings('unrealPct')">未實現盈虧%<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="cost" onclick="sortHoldings('cost')">成本基礎<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="mv" onclick="sortHoldings('mv')">市場價值<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="navPct" onclick="sortHoldings('navPct')">淨清算%<span class="hld-sort-arr">⇅</span></th>
-            <th class="r" data-col="costPct" onclick="sortHoldings('costPct')">成本佔比<span class="hld-sort-arr">⇅</span></th>
-          </tr></thead>
+          <thead><tr id="hld-thead-row"></tr></thead>
           <tbody id="hld-body">
-            <tr><td colspan="12" style="padding:14px 16px">
+            <tr><td colspan="4" style="padding:14px 16px">
               <div class="skel" style="height:40px;margin-bottom:6px"></div>
               <div class="skel" style="height:40px;margin-bottom:6px;opacity:.7"></div>
               <div class="skel" style="height:40px;opacity:.5"></div>
@@ -834,6 +843,12 @@ let tradeFilter='all';
 let allTrades=[],usTradesData=[];
 let hidden=false;
 let holdingsSortCol='mv',holdingsSortDir='desc';
+let holdingsTabMode='today';
+const HLD_TABS={
+  today:{cols:[{key:'price',label:'最後價'},{key:'dayPct',label:'變化%'},{key:'dayAmt',label:'盈虧$'}],defaultSort:'dayAmt'},
+  pnl:  {cols:[{key:'unrealPct',label:'未實現%'},{key:'unreal',label:'未實現$'},{key:'avg',label:'均價'}],defaultSort:'unrealPct'},
+  alloc:{cols:[{key:'costPct',label:'成本佔比'},{key:'mv',label:'市場價值'},{key:'navPct',label:'淨清算%'}],defaultSort:'costPct'},
+};
 
 /* ════════════════════════════════════════════
    CACHE
@@ -1303,8 +1318,16 @@ function renderHsSummaryMetrics(){
 }
 
 /* ════════════════════════════════════════════
-   OVERVIEW: HOLDINGS SORTABLE TABLE
+   OVERVIEW: HOLDINGS TAB + SORTABLE TABLE
 ════════════════════════════════════════════ */
+function switchHoldingsTab(tab){
+  holdingsTabMode=tab;
+  document.querySelectorAll('.hld-tab').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
+  holdingsSortCol=HLD_TABS[tab].defaultSort;
+  holdingsSortDir='desc';
+  renderHoldingsTable();
+}
+
 function sortHoldings(col){
   if(holdingsSortCol===col){holdingsSortDir=holdingsSortDir==='desc'?'asc':'desc';}
   else{holdingsSortCol=col;holdingsSortDir='desc';}
@@ -1317,27 +1340,26 @@ function renderHoldingsTable(){
   if(mkt==='TW'||mkt==='ALL')stocks.push(...stockData.filter(s=>s.mkt==='TW'));
   if(mkt==='US'||mkt==='ALL')stocks.push(...usStockData);
 
-  // Update sort arrows in header
-  document.querySelectorAll('.hld-tbl th[data-col]').forEach(th=>{
-    const col=th.dataset.col;
-    const active=col===holdingsSortCol;
-    th.classList.toggle('sort-active',active);
-    const arr=th.querySelector('.hld-sort-arr');
-    if(arr)arr.textContent=active?(holdingsSortDir==='desc'?' ▼':' ▲'):' ⇅';
-  });
+  const tabCfg=HLD_TABS[holdingsTabMode]||HLD_TABS.today;
+  const cols=tabCfg.cols;
+
+  // Render dynamic thead
+  const theadRow=document.getElementById('hld-thead-row');
+  if(theadRow){
+    const arr=c=>c===holdingsSortCol?(holdingsSortDir==='desc'?' ▼':' ▲'):' ⇅';
+    theadRow.innerHTML=
+      `<th class="l${holdingsSortCol==='name'?' sort-active':''}" data-col="name" onclick="sortHoldings('name')">投資產品<span class="hld-sort-arr">${arr('name')}</span></th>`+
+      cols.map(c=>`<th class="r${holdingsSortCol===c.key?' sort-active':''}" data-col="${c.key}" onclick="sortHoldings('${c.key}')">${c.label}<span class="hld-sort-arr">${arr(c.key)}</span></th>`).join('');
+  }
 
   const tbody=document.getElementById('hld-body');
-  if(!stocks.length){tbody.innerHTML='<tr><td colspan="12" class="empty">暫無資料</td></tr>';return;}
+  if(!stocks.length){tbody.innerHTML=`<tr><td colspan="4" class="empty">暫無資料</td></tr>`;return;}
 
   // Total NAV for 淨清算%
   let totalNAV=0;
-  if(mkt==='TW'){
-    totalNAV=latestTWMV>0?latestTWMV:stocks.reduce((s,x)=>s+x.sh*x.price,0);
-  } else if(mkt==='US'){
-    totalNAV=(ibNavUSD>0?ibNavUSD:stocks.reduce((s,x)=>s+x.sh*x.price,0))*fxRate;
-  } else {
-    totalNAV=stocks.reduce((s,x)=>s+x.sh*x.price*(x.mkt==='US'?fxRate:1),0);
-  }
+  if(mkt==='TW'){totalNAV=latestTWMV>0?latestTWMV:stocks.reduce((s,x)=>s+x.sh*x.price,0);}
+  else if(mkt==='US'){totalNAV=(ibNavUSD>0?ibNavUSD:stocks.reduce((s,x)=>s+x.sh*x.price,0))*fxRate;}
+  else{totalNAV=stocks.reduce((s,x)=>s+x.sh*x.price*(x.mkt==='US'?fxRate:1),0);}
 
   // Build row data
   const rows=stocks.map(s=>{
@@ -1347,22 +1369,17 @@ function renderHoldingsTable(){
     const dayChgPct=hasPrev?(s.price-prev)/prev*100:null;
     const dayChgAmt=hasPrev?(s.price-prev)*s.sh:null;
     const fees=isUS?0:(tradeFees[s.code]||0);
-    // Cost basis: prefer sheet data
     const costBasis=s.sheetCost&&s.sheetCost>0?s.sheetCost:(s.avg*s.sh+fees);
-    // Market value in local currency
     const mv=s.sh*s.price;
-    // Unrealized: prefer ibPnl (US) or sheet value, else compute
     let unrealized;
     if(isUS)unrealized=s.ibPnl!==null?s.ibPnl:mv-s.avg*s.sh;
     else unrealized=s.sheetUnreal!==null?s.sheetUnreal:mv-costBasis;
     const unrealPct=costBasis>0?unrealized/costBasis*100:0;
-    // NAV% uses NT$ equivalent
     const mvNTD=mv*(isUS?fxRate:1);
     const navPct=totalNAV>0?mvNTD/totalNAV*100:0;
     return {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,mvNTD};
   });
 
-  // Total cost for 成本佔比
   const totalCost=rows.reduce((s,r)=>s+r.costBasis*(r.isUS?fxRate:1),0);
   rows.forEach(r=>{r.costPct=totalCost>0?r.costBasis*(r.isUS?fxRate:1)/totalCost*100:0;});
 
@@ -1370,43 +1387,46 @@ function renderHoldingsTable(){
   const dir=holdingsSortDir==='asc'?1:-1;
   const sortMap={
     name:(a,b)=>dir*a.s.code.localeCompare(b.s.code),
-    sh:(a,b)=>dir*(a.s.sh-b.s.sh),
+    price:(a,b)=>dir*(a.s.price-b.s.price),
     dayPct:(a,b)=>dir*((a.dayChgPct??-Infinity)-(b.dayChgPct??-Infinity)),
     dayAmt:(a,b)=>dir*((a.dayChgAmt??-Infinity)-(b.dayChgAmt??-Infinity)),
     avg:(a,b)=>dir*(a.s.avg-b.s.avg),
-    price:(a,b)=>dir*(a.s.price-b.s.price),
     unreal:(a,b)=>dir*(a.unrealized-b.unrealized),
     unrealPct:(a,b)=>dir*(a.unrealPct-b.unrealPct),
-    cost:(a,b)=>dir*(a.costBasis-b.costBasis),
     mv:(a,b)=>dir*(a.mvNTD-b.mvNTD),
     navPct:(a,b)=>dir*(a.navPct-b.navPct),
     costPct:(a,b)=>dir*(a.costPct-b.costPct),
   };
   rows.sort(sortMap[holdingsSortCol]||sortMap.mv);
 
-  tbody.innerHTML=rows.map(({s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,costPct})=>{
-    const cur=isUS?'$':'';
-    const mkt=isUS?'US':'TW';
-    const pc=v=>clsPNmkt(v,mkt);
-    const sgn=v=>{
-      if(v===null)return '--';
-      return (v>=0?'+':'-')+cur+Math.abs(Math.round(v)).toLocaleString();
-    };
-    return `<tr>
-      <td class="l"><span class="hld-ticker">${s.code}</span><span class="hld-sname">${s.name}</span></td>
-      <td class="r">${s.sh.toLocaleString()}</td>
-      <td class="r ${hasPrev?pc(dayChgPct):'neu'}">${hasPrev?fmtPct(dayChgPct):'--'}</td>
-      <td class="r ${hasPrev?pc(dayChgAmt):'neu'}">${hasPrev?sgn(dayChgAmt):'--'}</td>
-      <td class="r">${cur}${s.avg.toFixed(2)}</td>
-      <td class="r">${s.price.toLocaleString()}</td>
-      <td class="r ${pc(unrealized)}">${(unrealized>=0?'+':'-')+cur+Math.abs(Math.round(unrealized)).toLocaleString()}</td>
-      <td class="r ${pc(unrealPct)}">${fmtPct(unrealPct)}</td>
-      <td class="r">${cur}${Math.round(costBasis).toLocaleString()}</td>
-      <td class="r">${cur}${Math.round(mv).toLocaleString()}</td>
-      <td class="r">${navPct.toFixed(1)}%</td>
-      <td class="r">${costPct.toFixed(1)}%</td>
-    </tr>`;
-  }).join('');
+  // Cell renderer per column key
+  function cell(key,r){
+    const {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,costPct}=r;
+    const cur=isUS?'$':'';const m=isUS?'US':'TW';const pc=v=>clsPNmkt(v,m);
+    const sgn=v=>v===null?'--':(v>=0?'+':'-')+cur+Math.abs(Math.round(v)).toLocaleString();
+    switch(key){
+      case 'price':    return `<td class="r">${s.price.toLocaleString()}</td>`;
+      case 'dayPct':   return `<td class="r ${hasPrev?pc(dayChgPct):'neu'}">${hasPrev?fmtPct(dayChgPct):'--'}</td>`;
+      case 'dayAmt':   return `<td class="r ${hasPrev?pc(dayChgAmt):'neu'}">${hasPrev?sgn(dayChgAmt):'--'}</td>`;
+      case 'avg':      return `<td class="r">${cur}${s.avg.toFixed(2)}</td>`;
+      case 'unreal':   return `<td class="r ${pc(unrealized)}">${(unrealized>=0?'+':'-')+cur+Math.abs(Math.round(unrealized)).toLocaleString()}</td>`;
+      case 'unrealPct':return `<td class="r ${pc(unrealPct)}">${fmtPct(unrealPct)}</td>`;
+      case 'mv':       return `<td class="r">${cur}${Math.round(mv).toLocaleString()}</td>`;
+      case 'navPct':   return `<td class="r">${navPct.toFixed(1)}%</td>`;
+      case 'costPct':  return `<td class="r">${costPct.toFixed(1)}%</td>`;
+      default: return `<td class="r">--</td>`;
+    }
+  }
+
+  tbody.innerHTML=rows.map(r=>`<tr>
+    <td class="l"><span class="hld-ticker">${r.s.code}</span><span class="hld-sname">${r.s.name}</span></td>
+    ${cols.map(c=>cell(c.key,r)).join('')}
+  </tr>`).join('');
+
+  // Fade in after content update
+  tbody.classList.remove('hld-fade');
+  void tbody.offsetWidth; // force reflow
+  tbody.classList.add('hld-fade');
 }
 
 /* ════════════════════════════════════════════
