@@ -122,16 +122,13 @@ body{
 
 /* ── CHART INFO BAR ── */
 .hs-info-bar{
-  position:absolute;top:0;left:0;right:0;z-index:4;
+  display:none;gap:8px;align-items:baseline;flex-wrap:wrap;
+  padding:5px 14px 5px;
+  background:#F9F9FB;
+  border-bottom:1px solid #EBEBEF;
   pointer-events:none;
-  opacity:0;transition:opacity .12s;
-  display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
-  padding:5px 10px 4px;
-  background:rgba(255,255,255,.92);
-  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-  border-radius:0;border-bottom:1px solid rgba(0,0,0,.06);
 }
-.hs-info-bar.show{opacity:1}
+.hs-info-bar.show{display:flex}
 .hs-ib-date{font-size:.72rem;color:#8E8E93;font-weight:600;white-space:nowrap}
 .hs-ib-nav{font-size:.9rem;font-weight:800;font-family:'Courier New',monospace;color:#1C1C1E;white-space:nowrap}
 .hs-ib-pnl{font-size:.8rem;font-weight:700;white-space:nowrap}
@@ -663,12 +660,12 @@ body{
 
         <!-- RIGHT: chart -->
         <div class="hs-right">
+          <div class="hs-info-bar" id="hs-info-bar">
+            <span class="hs-ib-date" id="hs-ib-date"></span>
+            <span class="hs-ib-nav" id="hs-ib-nav"></span>
+            <span class="hs-ib-pnl" id="hs-ib-pnl"></span>
+          </div>
           <div class="hs-chart-wrap">
-            <div class="hs-info-bar" id="hs-info-bar">
-              <span class="hs-ib-date" id="hs-ib-date"></span>
-              <span class="hs-ib-nav" id="hs-ib-nav"></span>
-              <span class="hs-ib-pnl" id="hs-ib-pnl"></span>
-            </div>
             <div class="hs-periods">
               <button class="hs-period" onclick="hsSetPeriod('1M',this)">1M</button>
               <button class="hs-period" onclick="hsSetPeriod('6M',this)">6M</button>
@@ -1740,6 +1737,14 @@ function renderHsSummaryChart(){
   });
 }
 
+// 手機 touch 結束後隱藏 info bar（Chart.js 不會自動 fire hover-out）
+document.getElementById('hsSummaryChart').addEventListener('touchend',()=>{
+  setTimeout(()=>{
+    document.getElementById('hs-info-bar')?.classList.remove('show');
+    if(hsSummaryChartInst){hsSummaryChartInst.tooltip.setActiveElements([],[]);hsSummaryChartInst.update('none');}
+  },600);
+},{passive:true});
+
 function clearHsChart(){
   const ctx=document.getElementById('hsSummaryChart').getContext('2d');
   if(hsSummaryChartInst)hsSummaryChartInst.destroy();
@@ -1962,30 +1967,38 @@ async function renderTrades(){
 /* BOOT */
 renderOverview();
 
-/* ════ SWIPE: 左右滑切換 Tab（防呆機制）════ */
+/* ════ SWIPE 手勢 ════
+   總覽頁：左右滑 → 切換台股 / 美股
+   其他頁：左右滑 → 切換分頁（防呆：距離 100px、角度 2.5x、速度 380ms、冷卻 400ms）
+═══════════════════════════════════════════ */
 (()=>{
   let tx=0,ty=0,tt=0,cooldown=false;
-  // 不在這些橫向捲動/互動區域內才觸發
-  const SKIP='.hld-wrap,.trade-scroll-wrap,.div-content,.hs-chart-wrap';
+  const SKIP_SCROLL='.hld-wrap,.trade-scroll-wrap,.div-content,.hs-chart-wrap';
   document.addEventListener('touchstart',e=>{
     tx=e.touches[0].clientX;ty=e.touches[0].clientY;tt=Date.now();
   },{passive:true});
   document.addEventListener('touchend',e=>{
     if(cooldown)return;
-    if(e.target.closest(SKIP))return;
+    if(e.target.closest(SKIP_SCROLL))return;
     const dx=e.changedTouches[0].clientX-tx;
     const dy=e.changedTouches[0].clientY-ty;
     const dt=Date.now()-tt;
-    if(Math.abs(dx)<110)return;           // 最小距離門檻
-    if(Math.abs(dx)<Math.abs(dy)*2.5)return; // 必須夠水平
-    if(dt>380)return;                      // 速度太慢忽略
-    const cur=PANEL_ORDER.find(p=>document.getElementById('panel-'+p)?.classList.contains('on'))||'overview';
-    const ci=PANEL_ORDER.indexOf(cur);
-    const ni=dx<0?Math.min(ci+1,PANEL_ORDER.length-1):Math.max(ci-1,0);
-    if(ni===ci)return;
+    if(Math.abs(dx)<100)return;
+    if(Math.abs(dx)<Math.abs(dy)*2.5)return;
+    if(dt>380)return;
     cooldown=true;
-    sw(PANEL_ORDER[ni]);
-    setTimeout(()=>cooldown=false,400); // 冷卻時間防止連續誤觸
+    const onOverview=document.getElementById('panel-overview')?.classList.contains('on');
+    if(onOverview){
+      // 總覽頁：切換台股 / 美股
+      setPortfolio(dx<0?'US':'TW');
+    } else {
+      // 其他頁：切換 Tab
+      const cur=PANEL_ORDER.find(p=>document.getElementById('panel-'+p)?.classList.contains('on'))||'overview';
+      const ci=PANEL_ORDER.indexOf(cur);
+      const ni=dx<0?Math.min(ci+1,PANEL_ORDER.length-1):Math.max(ci-1,0);
+      if(ni!==ci)sw(PANEL_ORDER[ni]);
+    }
+    setTimeout(()=>cooldown=false,400);
   },{passive:true});
 })();
 
