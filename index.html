@@ -84,7 +84,14 @@ body{
   background:none;border:none;cursor:pointer;
   -webkit-tap-highlight-color:transparent;
   transition:opacity .1s;
+  position:relative;
 }
+.bn::before{
+  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:0;height:3px;background:#007AFF;border-radius:0 0 3px 3px;
+  transition:width .22s cubic-bezier(.34,1.56,.64,1);
+}
+.bn.on::before{width:28px}
 .bn:active{opacity:.6}
 .bn svg{
   width:25px;height:25px;stroke:#8E8E93;fill:none;
@@ -99,7 +106,35 @@ body{
 
 /* ── PANELS ── */
 .panel{display:none}
-.panel.on{display:block}
+.panel.on{display:block;animation:panelIn .2s ease}
+@keyframes panelIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── BACK TO TOP ── */
+#back-top{
+  position:fixed;bottom:calc(82px + env(safe-area-inset-bottom));right:16px;z-index:150;
+  width:38px;height:38px;border-radius:50%;
+  background:rgba(28,28,30,.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  color:#fff;border:none;font-size:1rem;cursor:pointer;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+  box-shadow:0 2px 10px rgba(0,0,0,.22);display:flex;align-items:center;justify-content:center;
+}
+#back-top.show{opacity:1;pointer-events:auto}
+
+/* ── CHART INFO BAR ── */
+.hs-info-bar{
+  position:absolute;top:0;left:0;right:0;z-index:4;
+  pointer-events:none;
+  opacity:0;transition:opacity .12s;
+  display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
+  padding:5px 10px 4px;
+  background:rgba(255,255,255,.92);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  border-radius:0;border-bottom:1px solid rgba(0,0,0,.06);
+}
+.hs-info-bar.show{opacity:1}
+.hs-ib-date{font-size:.72rem;color:#8E8E93;font-weight:600;white-space:nowrap}
+.hs-ib-nav{font-size:.9rem;font-weight:800;font-family:'Courier New',monospace;color:#1C1C1E;white-space:nowrap}
+.hs-ib-pnl{font-size:.8rem;font-weight:700;white-space:nowrap}
 
 /* ── HOLDINGS SUMMARY CARD ── */
 .hs-card{
@@ -629,6 +664,11 @@ body{
         <!-- RIGHT: chart -->
         <div class="hs-right">
           <div class="hs-chart-wrap">
+            <div class="hs-info-bar" id="hs-info-bar">
+              <span class="hs-ib-date" id="hs-ib-date"></span>
+              <span class="hs-ib-nav" id="hs-ib-nav"></span>
+              <span class="hs-ib-pnl" id="hs-ib-pnl"></span>
+            </div>
             <div class="hs-periods">
               <button class="hs-period" onclick="hsSetPeriod('1M',this)">1M</button>
               <button class="hs-period" onclick="hsSetPeriod('6M',this)">6M</button>
@@ -1126,14 +1166,19 @@ async function loadTWHistory(){
 /* ════════════════════════════════════════════
    UI: NAVIGATION
 ════════════════════════════════════════════ */
+const PANEL_NAMES={overview:'總覽',dividends:'股利',lending:'借券',trade:'交易'};
+const PANEL_ORDER=['overview','dividends','lending','trade'];
 function sw(id){
-  const panels=['overview','dividends','lending','trade'];
-  panels.forEach(p=>{
+  PANEL_ORDER.forEach(p=>{
     const btn=document.getElementById('bn-'+p);
     if(btn)btn.classList.toggle('on',p===id);
   });
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.getElementById('panel-'+id).classList.add('on');
+  // breadcrumb — overview = root only, others show section
+  const bcSep=document.getElementById('bc-sep'),bcCur=document.getElementById('bc-cur');
+  if(id==='overview'){bcSep.style.display='none';bcCur.style.display='none';}
+  else{bcSep.style.display='';bcCur.style.display='';bcCur.textContent=PANEL_NAMES[id];}
   if(id==='dividends')renderDividends();
   if(id==='lending')renderLending();
   if(id==='trade')renderTrades();
@@ -1449,10 +1494,12 @@ function renderHsSummaryChart(){
   const lastPct=vals[vals.length-1];
   const isPos=lastPct>=0;
 
+  const lineColor=isPos?'#8B7FD4':'#FF3B30';
+
   const datasets=[{
     label:'投資組合',data:vals,
-    borderColor:isPos?'#8B7FD4':'#FF3B30',
-    backgroundColor:isPos?'rgba(139,127,212,.12)':'rgba(255,59,48,.08)',
+    borderColor:lineColor,
+    backgroundColor:'transparent', // set to gradient by plugin before draw
     fill:true,tension:.35,pointRadius:0,pointHitRadius:12,borderWidth:2,
   }];
 
@@ -1509,9 +1556,41 @@ function renderHsSummaryChart(){
     }
   }
 
-  const ctx=document.getElementById('hsSummaryChart').getContext('2d');
+  const fmtAbs=v=>mkt==='US'?'USD '+Math.round(v).toLocaleString():'NT$'+Math.round(v).toLocaleString();
+  const baseAbsVal=src[0]?.absVal??null;
+
+  // Info bar DOM refs
+  const infoBar=document.getElementById('hs-info-bar');
+  const ibDate=document.getElementById('hs-ib-date');
+  const ibNav=document.getElementById('hs-ib-nav');
+  const ibPnl=document.getElementById('hs-ib-pnl');
+
+  function updateInfoBar(idx){
+    if(!infoBar)return;
+    const pt=src[idx];
+    if(!pt){infoBar.classList.remove('show');return;}
+    const raw=labels[idx];
+    const dObj=new Date(raw);
+    ibDate.textContent=isNaN(dObj)?raw:
+      (dObj.getMonth()+1).toString().padStart(2,'0')+'/'+
+      dObj.getDate().toString().padStart(2,'0')+'/'+dObj.getFullYear();
+    ibNav.textContent=pt.absVal!=null?(hidden?'****':fmtAbs(pt.absVal)):'';
+    const v=vals[idx];
+    let pnlTxt='';
+    if(pt.absVal!=null&&baseAbsVal!=null){
+      const diff=pt.absVal-baseAbsVal;
+      pnlTxt=(diff>=0?'+':'')+fmtAbs(diff)+' ('+(v>=0?'+':'')+v.toFixed(2)+'%)';
+    } else {
+      pnlTxt=(v>=0?'+':'')+v.toFixed(2)+'%';
+    }
+    ibPnl.textContent=hidden?'****':pnlTxt;
+    ibPnl.className='hs-ib-pnl '+clsPNmkt(v,mkt);
+    infoBar.classList.add('show');
+  }
+
+  const canvasCtx=document.getElementById('hsSummaryChart').getContext('2d');
   if(hsSummaryChartInst)hsSummaryChartInst.destroy();
-  hsSummaryChartInst=new Chart(ctx,{
+  hsSummaryChartInst=new Chart(canvasCtx,{
     type:'line',data:{labels,datasets},
     options:{
       responsive:true,maintainAspectRatio:false,
@@ -1529,9 +1608,7 @@ function renderHsSummaryChart(){
             callback(v){
               const d=new Date(this.getLabelForValue(v));
               if(isNaN(d))return '';
-              if(hsPeriodMode==='1M'){
-                return (d.getMonth()+1)+'/'+(d.getDate());
-              }
+              if(hsPeriodMode==='1M'){return (d.getMonth()+1)+'/'+(d.getDate());}
               const mon=d.toLocaleDateString('en-US',{month:'short'});
               return d.getMonth()===0?[mon,String(d.getFullYear())]:mon;
             }
@@ -1547,127 +1624,117 @@ function renderHsSummaryChart(){
       animation:{duration:500}
     },
     plugins:[{
+      id:'gradientFill',
+      beforeDraw(chart){
+        const {ctx:c,chartArea}=chart;
+        if(!chartArea)return;
+        const g=c.createLinearGradient(0,chartArea.top,0,chartArea.bottom);
+        if(isPos){g.addColorStop(0,'rgba(139,127,212,.22)');g.addColorStop(1,'rgba(139,127,212,0)');}
+        else{g.addColorStop(0,'rgba(255,59,48,.18)');g.addColorStop(1,'rgba(255,59,48,0)');}
+        chart.data.datasets[0].backgroundColor=g;
+      }
+    },{
       id:'crosshair',
       afterDraw(chart){
         const ds=chart.data.datasets[0];
         if(!ds||!ds.data.length)return;
-        const {ctx,chartArea:{top,bottom,left,right}}=chart;
-        const color=isPos?'#8B7FD4':'#FF3B30';
+        const {ctx:c,chartArea:{top,bottom,left,right}}=chart;
         const PAD=6,BH=20,BH2=34,GAP=3;
-        const fmtAbs=v=>mkt==='US'?'USD '+Math.round(v).toLocaleString():'NT$'+Math.round(v).toLocaleString();
 
         function spreadBadges(badges){
           badges.sort((a,b)=>a.y-b.y);
           for(let i=1;i<badges.length;i++){
-            const ph=(badges[i-1].bh||BH), ch=(badges[i].bh||BH);
+            const ph=(badges[i-1].bh||BH),ch=(badges[i].bh||BH);
             const minY=badges[i-1].y+ph/2+GAP+ch/2;
             if(badges[i].y<minY)badges[i].y=minY;
           }
           badges.forEach(b=>{const bh=b.bh||BH;b.y=Math.max(top+bh/2,Math.min(bottom-bh/2,b.y));});
-          return badges;
         }
 
         function drawBadge(x,y,lbl,sub,bc){
           const bh=sub?BH2:BH;
-          ctx.font='bold 11px -apple-system,sans-serif';
-          const tw=ctx.measureText(lbl).width;
+          c.font='bold 11px -apple-system,sans-serif';
+          const tw=c.measureText(lbl).width;
           let sw=0;
-          if(sub){ctx.font='10px -apple-system,sans-serif';sw=ctx.measureText(sub).width;ctx.font='bold 11px -apple-system,sans-serif';}
+          if(sub){c.font='10px -apple-system,sans-serif';sw=c.measureText(sub).width;c.font='bold 11px -apple-system,sans-serif';}
           const bw=Math.max(tw,sw)+PAD*2;
-          ctx.fillStyle=bc;
-          ctx.beginPath();ctx.roundRect(x,y-bh/2,bw,bh,4);ctx.fill();
-          ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
-          if(sub){
-            ctx.fillText(lbl,x+PAD,y-7);
-            ctx.font='10px -apple-system,sans-serif';
-            ctx.fillText(sub,x+PAD,y+7);
-            ctx.font='bold 11px -apple-system,sans-serif';
-          } else {
-            ctx.fillText(lbl,x+PAD,y);
-          }
+          c.fillStyle=bc;c.beginPath();c.roundRect(x,y-bh/2,bw,bh,4);c.fill();
+          c.fillStyle='#fff';c.textAlign='left';c.textBaseline='middle';
+          if(sub){c.fillText(lbl,x+PAD,y-7);c.font='10px -apple-system,sans-serif';c.fillText(sub,x+PAD,y+7);c.font='bold 11px -apple-system,sans-serif';}
+          else{c.fillText(lbl,x+PAD,y);}
         }
 
-        ctx.save();
-        ctx.font='bold 11px -apple-system,sans-serif';
+        // Zero reference line
+        const zeroY=chart.scales.y.getPixelForValue(0);
+        if(zeroY>=top&&zeroY<=bottom){
+          c.save();c.strokeStyle='rgba(142,142,147,.5)';c.lineWidth=1;c.setLineDash([4,4]);
+          c.beginPath();c.moveTo(left,zeroY);c.lineTo(right,zeroY);c.stroke();
+          c.setLineDash([]);c.restore();
+        }
 
+        c.save();c.font='bold 11px -apple-system,sans-serif';
         const active=chart.tooltip?._active;
         const isHovering=active?.length>0;
 
-        // ── Always: dots at end of each line (visible regardless of hover) ──
+        // End-of-line dots + badges (shown when not hovering)
         const lastBadges=[];
         chart.data.datasets.forEach((dset,di)=>{
           const meta=chart.getDatasetMeta(di);
-          // Find last non-null data index
           let lastIdx=-1;
           for(let i=dset.data.length-1;i>=0;i--){if(dset.data[i]!=null){lastIdx=i;break;}}
           if(lastIdx<0)return;
-          const lastPt=meta.data[lastIdx];
-          const lastV=dset.data[lastIdx];
+          const lastPt=meta.data[lastIdx],lastV=dset.data[lastIdx];
           if(!lastPt||lastV==null)return;
-          const dc=di===0?color:dset.borderColor;
-          const dotR=di===0?4:3.5;
-          ctx.fillStyle=dc;
-          ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,dotR,0,Math.PI*2);ctx.fill();
-          ctx.fillStyle='#fff';
-          ctx.beginPath();ctx.arc(lastPt.x,lastPt.y,di===0?2:1.5,0,Math.PI*2);ctx.fill();
+          const dc=di===0?lineColor:dset.borderColor,dotR=di===0?4:3.5;
+          c.fillStyle=dc;c.beginPath();c.arc(lastPt.x,lastPt.y,dotR,0,Math.PI*2);c.fill();
+          c.fillStyle='#fff';c.beginPath();c.arc(lastPt.x,lastPt.y,di===0?2:1.5,0,Math.PI*2);c.fill();
           const absV=di===0&&src[lastIdx]?.absVal!=null?fmtAbs(src[lastIdx].absVal):null;
-          lastBadges.push({
-            y:lastPt.y,lbl:(lastV>=0?'+':'')+lastV.toFixed(2)+'%',
-            sub:absV,bh:absV?BH2:BH,color:dc
-          });
+          lastBadges.push({y:lastPt.y,lbl:(lastV>=0?'+':'')+lastV.toFixed(2)+'%',sub:absV,bh:absV?BH2:BH,color:dc});
         });
 
-        // Last-point badges: only when NOT hovering
         if(!isHovering){
+          infoBar?.classList.remove('show');
           spreadBadges(lastBadges);
           lastBadges.forEach(({y,lbl,sub,color:bc})=>{drawBadge(right+4,y,lbl,sub,bc);});
         }
 
-        // ── On hover: crosshair + hover badges only ──
-        if(!active?.length){ctx.restore();return;}
+        if(!active?.length){c.restore();return;}
         const idx=active[0].index;
         const meta0=chart.getDatasetMeta(0);
         const ptX=meta0.data[idx]?.x;
-        if(ptX==null){ctx.restore();return;}
+        if(ptX==null){c.restore();return;}
 
-        // Vertical dashed line
-        ctx.beginPath();ctx.moveTo(ptX,top);ctx.lineTo(ptX,bottom);
-        ctx.lineWidth=1;ctx.strokeStyle='rgba(100,100,100,.45)';
-        ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
+        // Update info bar with date / NAV / P&L vs period start
+        updateInfoBar(idx);
 
-        // Date badge
+        // Vertical crosshair
+        c.beginPath();c.moveTo(ptX,top);c.lineTo(ptX,bottom);
+        c.lineWidth=1;c.strokeStyle='rgba(100,100,100,.4)';
+        c.setLineDash([4,3]);c.stroke();c.setLineDash([]);
+
+        // Date badge at bottom of chart
         const raw=chart.data.labels[idx];
-        const d=new Date(raw);
-        const dateStr=isNaN(d)?raw:
-          (d.getMonth()+1).toString().padStart(2,'0')+'/'+
-          d.getDate().toString().padStart(2,'0')+'/'+d.getFullYear();
-        const dtw=ctx.measureText(dateStr).width;
-        const dbw=dtw+PAD*2;
+        const dObj=new Date(raw);
+        const dateStr=isNaN(dObj)?raw:
+          (dObj.getMonth()+1).toString().padStart(2,'0')+'/'+
+          dObj.getDate().toString().padStart(2,'0')+'/'+dObj.getFullYear();
+        const dtw=c.measureText(dateStr).width,dbw=dtw+PAD*2;
         const dbx=Math.min(Math.max(ptX-dbw/2,left),right-dbw);
-        ctx.fillStyle='#1C1C1E';
-        ctx.beginPath();ctx.roundRect(dbx,bottom+4,dbw,BH,4);ctx.fill();
-        ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
-        ctx.fillText(dateStr,dbx+PAD,bottom+4+BH/2);
+        c.fillStyle='#1C1C1E';c.beginPath();c.roundRect(dbx,bottom+4,dbw,BH,4);c.fill();
+        c.fillStyle='#fff';c.textAlign='left';c.textBaseline='middle';
+        c.fillText(dateStr,dbx+PAD,bottom+4+BH/2);
 
-        // Hover badges
+        // Right-side hover badges (% only)
         const hoverBadges=[];
         chart.data.datasets.forEach((dset,di)=>{
           const meta=chart.getDatasetMeta(di);
-          const hv=dset.data[idx];
-          if(hv==null)return;
-          const hpt=meta.data[idx];
-          if(!hpt)return;
-          const absV=di===0&&src[idx]?.absVal!=null?fmtAbs(src[idx].absVal):null;
-          hoverBadges.push({
-            y:hpt.y,
-            lbl:(hv>=0?'+':'')+hv.toFixed(2)+'%',
-            sub:absV,bh:absV?BH2:BH,
-            color:di===0?'#3A3A3C':dset.borderColor
-          });
+          const hv=dset.data[idx];if(hv==null)return;
+          const hpt=meta.data[idx];if(!hpt)return;
+          hoverBadges.push({y:hpt.y,lbl:(hv>=0?'+':'')+hv.toFixed(2)+'%',sub:null,bh:BH,color:di===0?'#3A3A3C':dset.borderColor});
         });
         spreadBadges(hoverBadges);
         hoverBadges.forEach(({y,lbl,sub,color:bc})=>{drawBadge(right+4,y,lbl,sub,bc);});
-        ctx.restore();
+        c.restore();
       }
     }]
   });
@@ -1895,23 +1962,49 @@ async function renderTrades(){
 /* BOOT */
 renderOverview();
 
-/* ════ SWIPE: 左右滑切換台股/美股 ════ */
+/* ════ SWIPE: 左右滑切換 Tab（防呆機制）════ */
 (()=>{
-  let tx=0,ty=0;
-  const el=document.getElementById('main');
-  el.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
-  el.addEventListener('touchend',e=>{
+  let tx=0,ty=0,tt=0,cooldown=false;
+  // 不在這些橫向捲動/互動區域內才觸發
+  const SKIP='.hld-wrap,.trade-scroll-wrap,.div-content,.hs-chart-wrap';
+  document.addEventListener('touchstart',e=>{
+    tx=e.touches[0].clientX;ty=e.touches[0].clientY;tt=Date.now();
+  },{passive:true});
+  document.addEventListener('touchend',e=>{
+    if(cooldown)return;
+    if(e.target.closest(SKIP))return;
     const dx=e.changedTouches[0].clientX-tx;
     const dy=e.changedTouches[0].clientY-ty;
-    if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.5){
-      setPortfolio(dx<0?'US':'TW');
-    }
+    const dt=Date.now()-tt;
+    if(Math.abs(dx)<110)return;           // 最小距離門檻
+    if(Math.abs(dx)<Math.abs(dy)*2.5)return; // 必須夠水平
+    if(dt>380)return;                      // 速度太慢忽略
+    const cur=PANEL_ORDER.find(p=>document.getElementById('panel-'+p)?.classList.contains('on'))||'overview';
+    const ci=PANEL_ORDER.indexOf(cur);
+    const ni=dx<0?Math.min(ci+1,PANEL_ORDER.length-1):Math.max(ci-1,0);
+    if(ni===ci)return;
+    cooldown=true;
+    sw(PANEL_ORDER[ni]);
+    setTimeout(()=>cooldown=false,400); // 冷卻時間防止連續誤觸
   },{passive:true});
 })();
+
+/* ════ SCROLL: 回到頂部按鈕 ════ */
+window.addEventListener('scroll',()=>{
+  const btn=document.getElementById('back-top');
+  if(btn)btn.classList.toggle('show',window.scrollY>300);
+},{passive:true});
 </script>
+
+<!-- ════ BACK TO TOP ════ -->
+<button id="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="回到頂部">↑</button>
 
 <!-- ════ BOTTOM NAV ════ -->
 <nav id="bottom-nav">
+  <button class="bn on" id="bn-overview" onclick="sw('overview')">
+    <ion-icon name="bar-chart-outline"></ion-icon>
+    <span>總覽</span>
+  </button>
   <button class="bn" id="bn-dividends" onclick="sw('dividends')">
     <ion-icon name="cash-outline"></ion-icon>
     <span>股利</span>
@@ -1923,10 +2016,6 @@ renderOverview();
   <button class="bn" id="bn-trade" onclick="sw('trade')">
     <svg viewBox="0 0 24 24"><path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/></svg>
     <span>交易</span>
-  </button>
-  <button class="bn on" id="bn-overview" onclick="sw('overview')">
-    <ion-icon name="bar-chart-outline"></ion-icon>
-    <span>總覽</span>
   </button>
 </nav>
 </body>
