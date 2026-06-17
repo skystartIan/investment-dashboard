@@ -1737,12 +1737,10 @@ function renderHsSummaryChart(){
   });
 }
 
-// 手機 touch 結束後隱藏 info bar（Chart.js 不會自動 fire hover-out）
+// 手機 touch 結束後立即隱藏 info bar
 document.getElementById('hsSummaryChart').addEventListener('touchend',()=>{
-  setTimeout(()=>{
-    document.getElementById('hs-info-bar')?.classList.remove('show');
-    if(hsSummaryChartInst){hsSummaryChartInst.tooltip.setActiveElements([],[]);hsSummaryChartInst.update('none');}
-  },600);
+  document.getElementById('hs-info-bar')?.classList.remove('show');
+  if(hsSummaryChartInst){hsSummaryChartInst.tooltip.setActiveElements([],[]);hsSummaryChartInst.update('none');}
 },{passive:true});
 
 function clearHsChart(){
