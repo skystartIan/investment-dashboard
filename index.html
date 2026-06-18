@@ -375,34 +375,37 @@ body{
   cursor:pointer;background:#F2F2F7;color:#636366;transition:all .15s;
 }
 .tf.on,.tf:hover{background:#007AFF;color:#fff;border-color:#007AFF}
-.trade-scroll-wrap{
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
-  scrollbar-width:none;
+.t-card{
+  position:relative;background:#fff;border-radius:12px;
+  margin:8px 16px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden;
 }
-.trade-scroll-wrap::-webkit-scrollbar{display:none}
-.trade-hdr{
-  display:grid;
-  grid-template-columns:105px 80px 60px 80px 100px 110px 80px;
-  gap:10px;padding:8px 18px;
-  font-size:.72rem;font-weight:800;color:#8E8E93;
-  text-transform:uppercase;letter-spacing:.5px;
-  border-bottom:1px solid #E5E5EA;background:#FAFAFA;
+.t-card::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
 }
-.trade-row-new{
-  display:grid;
-  grid-template-columns:105px 80px 60px 80px 100px 110px 80px;
-  gap:10px;padding:11px 18px;
-  border-bottom:1px solid #F2F2F7;
-  font-size:.85rem;transition:background .12s;
-  align-items:center;
+.t-card.buy::before{background:#34C759}
+.t-card.sell::before{background:#FF3B30}
+.t-card-inner{padding:12px 16px 12px 20px;display:flex;flex-direction:column;gap:6px}
+.t-row1{display:flex;justify-content:space-between;align-items:center}
+.t-row1-left{display:flex;align-items:center;gap:8px}
+.t-badge{
+  font-size:.72rem;font-weight:800;padding:2px 8px;
+  border-radius:6px;letter-spacing:.3px;flex-shrink:0;
 }
-.trade-row-new:hover{background:#FAFAFA}
-.t-buy{color:#34C759;font-weight:800}
-.t-sell{color:#FF3B30;font-weight:800}
-.t-ticker{font-weight:800;color:#007AFF;font-family:'Courier New',monospace}
-.t-date{color:#636366;font-family:'Courier New',monospace;font-size:.82rem}
-.t-mono{font-family:'Courier New',monospace;font-weight:600}
+.t-badge.buy{background:rgba(52,199,89,.12);color:#34C759}
+.t-badge.sell{background:rgba(255,59,48,.1);color:#FF3B30}
+.t-ticker{font-weight:800;font-size:.95rem;color:#1C1C1E;letter-spacing:.5px}
+.t-mkt{
+  font-size:.7rem;color:#8E8E93;font-weight:700;
+  background:#F2F2F7;padding:2px 6px;border-radius:5px;
+}
+.t-date{font-size:.78rem;color:#8E8E93;font-weight:600;white-space:nowrap}
+.t-row2{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.t-desc{font-size:.82rem;color:#48484A;font-weight:600}
+.t-total{font-size:1rem;font-weight:800;font-family:'Courier New',monospace;white-space:nowrap}
+.t-total.buy{color:#34C759}
+.t-total.sell{color:#FF3B30}
+.t-row3{display:flex;justify-content:flex-end}
+.t-fee{font-size:.75rem;color:#8E8E93;font-weight:600}
 /* ── HEADER FX + HIDE HELPERS ── */
 .hdr-fx{font-size:.78rem;color:#48484A;white-space:nowrap}
 .hdr-fx b{color:#8E8E93}
@@ -763,13 +766,7 @@ body{
         <button class="tf" onclick="setTradeFilter('TW',this)">台股</button>
         <button class="tf" onclick="setTradeFilter('US',this)">美股</button>
       </div>
-      <div class="trade-scroll-wrap">
-        <div class="trade-hdr">
-          <span>日期</span><span>股票</span><span>買賣</span>
-          <span>數量</span><span>成交價</span><span>金額</span><span>費用</span>
-        </div>
-        <div id="trade-list"></div>
-      </div>
+      <div id="trade-list" style="padding:6px 0 12px"></div>
     </div>
   </div>
 
@@ -1966,15 +1963,27 @@ async function renderTrades(){
     const isUS=t.mkt==='US';
     const isBuy=t.side==='BUY';
     const amt=t.qty*t.price;
-    return `<div class="trade-row-new">
-      <span class="t-date">${t.date}</span>
-      <span class="t-ticker">${t.ticker||t.code||'--'}</span>
-      <span class="${isBuy?'t-buy':'t-sell'}">${isBuy?'▲ 買':'▼ 賣'}</span>
-      <span class="t-mono">${(t.qty||0).toLocaleString()}</span>
-      <span class="t-mono">${isUS?'$':'NT$'}${(t.price||0).toLocaleString()}</span>
-      <span class="t-mono">${isUS?'$':'NT$'}${Math.round(amt).toLocaleString()}</span>
-      <span style="color:#636366;font-family:'Courier New',monospace">${t.fee?'$'+t.fee.toLocaleString():'--'}</span>
-    </div>`;
+    const cur=isUS?'$':'NT$';
+    const fmt=n=>n.toLocaleString();
+    const dateStr=String(t.date).slice(0,10).replace(/-/g,'/');
+    const feeHtml=t.fee?`<div class="t-row3"><span class="t-fee">手續費 ${cur}${fmt(t.fee)}</span></div>`:'';
+    return `<div class="t-card ${isBuy?'buy':'sell'}">
+  <div class="t-card-inner">
+    <div class="t-row1">
+      <div class="t-row1-left">
+        <span class="t-badge ${isBuy?'buy':'sell'}">${isBuy?'買入':'賣出'}</span>
+        <span class="t-ticker">${t.ticker||t.code||'--'}</span>
+        <span class="t-mkt">${isUS?'US':'TW'}</span>
+      </div>
+      <span class="t-date">${dateStr}</span>
+    </div>
+    <div class="t-row2">
+      <span class="t-desc">${fmt(t.qty||0)} 股 × ${cur}${fmt(t.price||0)}</span>
+      <span class="t-total ${isBuy?'buy':'sell'}">${cur}${fmt(Math.round(amt))}</span>
+    </div>
+    ${feeHtml}
+  </div>
+</div>`;
   }).join('');
 }
 
@@ -1987,7 +1996,7 @@ renderOverview();
 ═══════════════════════════════════════════ */
 (()=>{
   let tx=0,ty=0,tt=0,cooldown=false;
-  const SKIP_SCROLL='.hld-wrap,.trade-scroll-wrap,.div-content,.hs-chart-wrap';
+  const SKIP_SCROLL='.hld-wrap,.div-content,.hs-chart-wrap';
   document.addEventListener('touchstart',e=>{
     tx=e.touches[0].clientX;ty=e.touches[0].clientY;tt=Date.now();
   },{passive:true});
