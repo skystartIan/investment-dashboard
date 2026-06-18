@@ -335,25 +335,32 @@ body{
 .chart-area-sm{padding:16px;position:relative;height:260px;margin-top:8px}
 
 /* ── DIVIDENDS ── */
-.dtab{width:100%;border-collapse:collapse}
-.dtab th{
-  font-size:.73rem;font-weight:800;color:#8E8E93;
-  text-transform:uppercase;letter-spacing:.5px;
-  padding:10px 16px;border-bottom:1px solid #E5E5EA;text-align:left;
-  background:#FAFAFA;
-}
-.dtab td{padding:11px 16px;border-bottom:1px solid #F2F2F7;font-size:.88rem}
-.dtab tr:hover td{background:#FAFAFA}
-.dbadge{
-  display:inline-block;padding:2px 8px;border-radius:10px;font-size:.73rem;font-weight:700;
-}
-.dbadge.div{background:#D1F2DB;color:#1A7A35}
-.dbadge.wht{background:#FFE5E5;color:#CC0000}
+.dbadge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.72rem;font-weight:800;flex-shrink:0}
+.dbadge.div{background:rgba(52,199,89,.12);color:#34C759}
+.dbadge.wht{background:rgba(255,59,48,.1);color:#FF3B30}
 .div-sum{
-  padding:12px 16px;background:#F0FAF4;
-  border-bottom:1px solid #C9EDD6;
-  font-weight:700;font-size:.92rem;color:#1A7A35;
+  margin:10px 16px 4px;padding:11px 16px;
+  background:#F0FAF4;border-radius:10px;
+  font-weight:700;font-size:.9rem;color:#1A7A35;
 }
+.d-card{
+  position:relative;background:#fff;border-radius:12px;
+  margin:8px 16px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden;
+}
+.d-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px}
+.d-card.div-type::before{background:#34C759}
+.d-card.wht-type::before{background:#FF3B30}
+.d-card-inner{padding:12px 16px 12px 20px;display:flex;flex-direction:column;gap:6px}
+.d-row1{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.d-row1-left{display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden}
+.d-ticker{font-weight:800;font-size:.92rem;color:#1C1C1E;flex-shrink:0}
+.d-name{font-size:.78rem;color:#8E8E93;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-date{font-size:.78rem;color:#8E8E93;font-weight:600;white-space:nowrap;flex-shrink:0}
+.d-row2{display:flex;justify-content:space-between;align-items:center}
+.d-cur{font-size:.72rem;color:#8E8E93;font-weight:700;background:#F2F2F7;padding:2px 6px;border-radius:5px}
+.d-amt{font-size:1rem;font-weight:800;font-family:'Courier New',monospace}
+.d-amt.pos{color:#34C759}
+.d-amt.neg{color:#FF3B30}
 
 /* ── LENDING ── */
 .mini-metrics{
@@ -484,27 +491,6 @@ body{
 
   /* Chart */
   .chart-area{height:220px;padding:10px}
-
-  /* Trade: 手機版改為 flex 卡片排列 */
-  .trade-hdr{display:none}
-  .trade-row-new{
-    display:flex;flex-wrap:wrap;
-    align-items:baseline;
-    padding:11px 14px;
-    gap:0;column-gap:6px;
-    /* reset grid */
-    grid-template-columns:none;
-  }
-  .trade-row-new>span:nth-child(3){order:1;font-size:.88rem}
-  .trade-row-new>span:nth-child(2){order:2;flex:1;font-size:.95rem;margin-left:5px}
-  .trade-row-new>span:nth-child(6){order:3;font-size:.88rem;font-weight:800}
-  .trade-row-new>span:nth-child(1){order:10;flex-basis:100%;font-size:.72rem;color:#8E8E93;margin-top:4px}
-  .trade-row-new>span:nth-child(4){order:11;font-size:.72rem;color:#636366}
-  .trade-row-new>span:nth-child(5){order:12;font-size:.72rem;color:#636366;margin-left:4px}
-  .trade-row-new>span:nth-child(7){display:none}
-
-  /* Dividends */
-  .dtab th,.dtab td{padding:9px 10px;font-size:.8rem}
 
   /* SC header: wrap 時 btns 換行 */
   .sc-hdr{gap:6px}
@@ -735,13 +721,8 @@ body{
         <div class="sc-title">股利紀錄</div>
         <div class="sc-btns" id="div-year-wrap"></div>
       </div>
-      <div id="div-content" style="overflow-x:auto">
-        <table class="dtab">
-          <thead><tr>
-            <th>日期</th><th>股票</th><th>類型</th><th>金額</th><th>幣別</th>
-          </tr></thead>
-          <tbody id="div-body"></tbody>
-        </table>
+      <div id="div-content">
+        <div id="div-body" style="padding:6px 0 12px"></div>
       </div>
     </div>
   </div>
@@ -1898,19 +1879,34 @@ function renderDivTable(records){
   wrap.innerHTML=years.map(y=>`<button class="sc-btn${y===divYearFilter?' on':''}" onclick="divYearFilter='${y}';renderDividends()">${y}</button>`).join('');
   const filtered=records.filter(r=>r.date.startsWith(divYearFilter));
   const total=filtered.reduce((s,r)=>s+Math.abs(r.amount)*(r.currency==='TWD'?1:fxRate),0);
-  const tbody=document.getElementById('div-body');
+  const body=document.getElementById('div-body');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="5" style="text-align:center;padding:32px;color:#8E8E93">${divYearFilter} 年無紀錄</td></tr>`;
+    body.innerHTML=`<div style="text-align:center;padding:40px;color:#8E8E93;font-size:.9rem">${divYearFilter} 年無紀錄</div>`;
     return;
   }
-  const sumHtml=`<tr><td colspan="5" class="div-sum">💰 ${divYearFilter} 年股利合計：NT$${Math.round(total).toLocaleString()}</td></tr>`;
-  tbody.innerHTML=sumHtml+filtered.map(r=>`<tr>
-    <td style="font-family:'Courier New',monospace;font-weight:600">${r.date}</td>
-    <td><b style="color:#007AFF">${r.ticker}</b><br><span style="font-size:.8rem;color:#636366">${r.name}</span></td>
-    <td><span class="dbadge ${r.type==='Dividends'?'div':'wht'}">${r.type==='Dividends'?'現金股利':'預扣稅'}</span></td>
-    <td><b class="${r.amount>=0?'pos':'neg'}">${r.currency==='TWD'?'NT$':'$'}${Math.abs(r.amount).toLocaleString()}</b></td>
-    <td style="color:#636366;font-weight:600">${r.currency}</td>
-  </tr>`).join('');
+  const sumHtml=`<div class="div-sum">💰 ${divYearFilter} 年股利合計：NT$${Math.round(total).toLocaleString()}</div>`;
+  body.innerHTML=sumHtml+filtered.map(r=>{
+    const isDividend=r.type==='Dividends';
+    const cur=r.currency==='TWD'?'NT$':'$';
+    const dateStr=String(r.date).slice(0,10).replace(/-/g,'/');
+    const nameHtml=r.name&&r.name!==r.ticker?`<span class="d-name">${r.name}</span>`:'';
+    return `<div class="d-card ${isDividend?'div-type':'wht-type'}">
+  <div class="d-card-inner">
+    <div class="d-row1">
+      <div class="d-row1-left">
+        <span class="dbadge ${isDividend?'div':'wht'}">${isDividend?'現金股利':'預扣稅'}</span>
+        <span class="d-ticker">${r.ticker}</span>
+        ${nameHtml}
+      </div>
+      <span class="d-date">${dateStr}</span>
+    </div>
+    <div class="d-row2">
+      <span class="d-cur">${r.currency}</span>
+      <span class="d-amt ${r.amount>=0?'pos':'neg'}">${cur}${Math.abs(r.amount).toLocaleString()}</span>
+    </div>
+  </div>
+</div>`;
+  }).join('');
 }
 
 /* ════════════════════════════════════════════
@@ -1996,7 +1992,7 @@ renderOverview();
 ═══════════════════════════════════════════ */
 (()=>{
   let tx=0,ty=0,tt=0,cooldown=false;
-  const SKIP_SCROLL='.hld-wrap,.div-content,.hs-chart-wrap';
+  const SKIP_SCROLL='.hld-wrap,.hs-chart-wrap';
   document.addEventListener('touchstart',e=>{
     tx=e.touches[0].clientX;ty=e.touches[0].clientY;tt=Date.now();
   },{passive:true});
