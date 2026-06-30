@@ -338,6 +338,7 @@ body{
 .dbadge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.72rem;font-weight:800;flex-shrink:0}
 .dbadge.div{background:rgba(52,199,89,.12);color:#34C759}
 .dbadge.wht{background:rgba(255,59,48,.1);color:#FF3B30}
+.dbadge.upcoming{background:rgba(0,122,255,.12);color:#007AFF}
 .div-sum{
   margin:10px 16px 4px;padding:11px 16px;
   background:#F0FAF4;border-radius:10px;
@@ -661,6 +662,13 @@ body{
                 <span class="hs-fx-equiv" id="hs-unreal-ntd"></span>
               </div>
             </div>
+            <div class="hs-mrow">
+              <div class="hs-mlbl">年化報酬率 <span class="hs-info" title="XIRR：今年以來，含買賣與已領現金股利">i</span></div>
+              <div class="hs-mval-wrap">
+                <span class="hs-mval" id="hs-xirr-ytd">--</span>
+                <span class="hs-fx-equiv" id="hs-xirr-all"></span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -770,29 +778,6 @@ const histMonthly=[
   ['2026-02-28',2608956],['2026-03-28',2770043],['2026-04-10',3094038],
 ];
 
-const DIVIDEND_RECORDS=[
-  {code:'0050',name:'元大台灣50',date:'2024-07-16',shares:3383,cps:1.000},
-  {code:'0050',name:'元大台灣50',date:'2025-01-17',shares:4451,cps:2.700},
-  {code:'0050',name:'元大台灣50',date:'2025-07-21',shares:20144,cps:0.360},
-  {code:'0050',name:'元大台灣50',date:'2026-01-22',shares:19281,cps:1.000},
-  {code:'0056',name:'元大高股息',date:'2024-07-16',shares:11195,cps:1.070},
-  {code:'0056',name:'元大高股息',date:'2024-10-17',shares:11994,cps:1.070},
-  {code:'0056',name:'元大高股息',date:'2025-01-17',shares:17788,cps:1.070},
-  {code:'0056',name:'元大高股息',date:'2025-04-23',shares:20637,cps:1.070},
-  {code:'0056',name:'元大高股息',date:'2025-07-21',shares:21515,cps:0.866},
-  {code:'0056',name:'元大高股息',date:'2025-10-23',shares:18342,cps:0.866},
-  {code:'2330',name:'台積電',date:'2024-09-12',shares:141,cps:4.000},
-  {code:'2330',name:'台積電',date:'2024-12-12',shares:141,cps:4.000},
-  {code:'2330',name:'台積電',date:'2025-03-18',shares:141,cps:4.500},
-  {code:'2330',name:'台積電',date:'2025-06-12',shares:141,cps:4.500},
-  {code:'2330',name:'台積電',date:'2025-09-16',shares:141,cps:5.000},
-  {code:'2330',name:'台積電',date:'2025-12-11',shares:141,cps:5.000},
-  {code:'2330',name:'台積電',date:'2026-03-17',shares:157,cps:6.000},
-  {code:'2344',name:'華邦電',date:'2026-03-27',shares:450,cps:0.500},
-  {code:'2454',name:'聯發科',date:'2025-07-03',shares:16,cps:25.000},
-  {code:'8996',name:'高力',date:'2026-03-27',shares:35,cps:4.555},
-];
-
 const PIE_COLORS=[
   '#007AFF','#34C759','#FF9500','#FF3B30','#5856D6',
   '#AF52DE','#FF2D55','#00C7BE','#A2845E','#30B0C7',
@@ -819,6 +804,7 @@ let hsPeriodMode='YTD';
 let divYearFilter='2026';
 let tradeFilter='all';
 let allTrades=[],usTradesData=[];
+let dividendsTW=[];
 let hidden=false;
 let holdingsSortCol='mv',holdingsSortDir='desc';
 let holdingsTabMode='today';
@@ -945,6 +931,7 @@ async function refresh(){
   loadUSBenchmark();
   loadTWHistory();
   loadFxRate();
+  loadTWDividends();
 }
 
 async function fetchPrevClose(){
@@ -1034,6 +1021,7 @@ async function calcTradeFees(){
         qty:+r[qtI]||0,price:+r[prI]||0,fee:feI>=0?(+r[feI]||0):0,mkt:'TW'
       };
     }).sort((a,b)=>b.date.localeCompare(a.date));
+    renderXirrMetric();
   }catch(_){}
 }
 
@@ -1150,7 +1138,86 @@ async function loadTWHistory(){
     _sc('twmv',{mv:latestTWMV,ur:latestTWUnrealized});
     renderHsSummaryChart();
     renderHsSummaryMetrics();
+    renderXirrMetric();
   }catch(e){console.error('loadTWHistory',e);}
+}
+
+/* ════════════════════════════════════════════
+   XIRR（年化報酬率，含已實現股利）
+════════════════════════════════════════════ */
+function xirr(cashflows){
+  // cashflows: [{date:'YYYY-MM-DD', amount:Number}], 至少需要一筆負值與一筆正值
+  if(cashflows.length<2)return null;
+  const sorted=[...cashflows].sort((a,b)=>a.date.localeCompare(b.date));
+  const hasNeg=sorted.some(c=>c.amount<0), hasPos=sorted.some(c=>c.amount>0);
+  if(!hasNeg||!hasPos)return null;
+  const d0=new Date(sorted[0].date);
+  const yrs=d=>(new Date(d)-d0)/(365*86400000);
+  let rate=0.1;
+  for(let i=0;i<100;i++){
+    let f=0,df=0;
+    sorted.forEach(cf=>{
+      const t=yrs(cf.date);
+      const denom=Math.pow(1+rate,t);
+      f+=cf.amount/denom;
+      df+=-t*cf.amount/Math.pow(1+rate,t+1);
+    });
+    if(Math.abs(df)<1e-10)break;
+    const newRate=rate-f/df;
+    if(!isFinite(newRate)||newRate<=-0.999)break;
+    if(Math.abs(newRate-rate)<1e-7){rate=newRate;break;}
+    rate=newRate;
+  }
+  return isFinite(rate)?rate:null;
+}
+
+function buildXirrCashflows(sinceDate){
+  // sinceDate: 'YYYY-MM-DD'，限定區間起點；null 表示自最早持倉以來
+  const flows=[];
+  if(sinceDate){
+    const before=twHistoryData.filter(h=>h.date<=sinceDate);
+    const startPV=before.length?before[before.length-1].pv:null;
+    if(!startPV)return null; // 該期間無起始市值資料，無法計算
+    flows.push({date:sinceDate,amount:-startPV});
+  }
+  allTrades.filter(t=>t.mkt==='TW'&&(!sinceDate||t.date>=sinceDate)).forEach(t=>{
+    const amt=t.qty*t.price+(t.fee||0);
+    if(amt)flows.push({date:t.date,amount:t.side==='BUY'?-amt:amt});
+  });
+  dividendsTW.filter(d=>d.status==='received'&&(!sinceDate||d.date>=sinceDate)).forEach(d=>{
+    if(d.amount)flows.push({date:d.date,amount:d.amount});
+  });
+  const endPV=latestTWMV>0?latestTWMV:stockData.filter(s=>s.mkt==='TW').reduce((a,s)=>a+s.sh*s.price,0);
+  if(!endPV)return null;
+  flows.push({date:new Date().toISOString().slice(0,10),amount:endPV});
+  return flows;
+}
+
+function renderXirrMetric(){
+  const elYtd=document.getElementById('hs-xirr-ytd');
+  const elAll=document.getElementById('hs-xirr-all');
+  if(!elYtd||!elAll)return;
+  if(!twHistoryData.length||!stockData.length){elYtd.textContent='--';elAll.textContent='';return;}
+
+  const thisYear=new Date().getFullYear()+'-01-01';
+  const ytdFlows=buildXirrCashflows(thisYear);
+  const ytdRate=ytdFlows?xirr(ytdFlows):null;
+
+  const earliestDate=twHistoryData[0]?.date||null;
+  const allFlows=earliestDate?buildXirrCashflows(null):null;
+  const allRate=allFlows?xirr(allFlows):null;
+
+  if(ytdRate!==null){
+    elYtd.textContent=(ytdRate>=0?'+':'')+(ytdRate*100).toFixed(1)+'%';
+    elYtd.className='hs-mval '+clsPNmkt(ytdRate,'TW');
+  } else {
+    elYtd.textContent='--';
+  }
+  if(allRate!==null){
+    elAll.textContent='全期間: '+(allRate>=0?'+':'')+(allRate*100).toFixed(1)+'%';
+  } else {
+    elAll.textContent='';
+  }
 }
 
 /* ════════════════════════════════════════════
@@ -1845,12 +1912,41 @@ function renderDividends(){
   const mkt=currentPortfolio;
   let records=[];
   if(mkt!=='US'){
-    DIVIDEND_RECORDS.forEach(r=>records.push({
-      date:r.date,ticker:r.code,name:r.name,
-      amount:r.shares*r.cps,currency:'TWD',type:'Dividends',mkt:'TW'
+    records=dividendsTW.map(r=>({
+      date:r.date,ticker:r.code,name:r.name,amount:r.amount,
+      currency:'TWD',type:'Dividends',mkt:'TW',status:r.status
     }));
   }
   loadUSDividends(records);
+}
+
+async function loadTWDividends(){
+  try{
+    const res=await gas({action:'read',sheet:'dividends_tw'});
+    if(!res.ok||!res.data?.length)return;
+    const hdr=res.data[0].map(h=>String(h).trim());
+    const dtI=hdr.indexOf('date'),cdI=hdr.indexOf('code'),nmI=hdr.indexOf('name'),
+          shI=hdr.indexOf('shares'),cpsI=hdr.indexOf('cps'),amtI=hdr.indexOf('amount'),
+          payI=hdr.indexOf('pay_date'),stI=hdr.indexOf('status');
+    dividendsTW=res.data.slice(1).filter(r=>r[0]).map(r=>{
+      const code=String(r[cdI]).trim();
+      const status=String(r[stI]||'received').trim();
+      const cps=+r[cpsI]||0;
+      let amount=+r[amtI]||0;
+      if(status==='upcoming'&&!amount){
+        // 尚未發生：用目前持股數估算金額供顯示參考
+        const hold=stockData.find(s=>s.code===code.padStart(4,'0'));
+        amount=hold?hold.sh*cps:0;
+      }
+      return {
+        date:String(r[dtI]).slice(0,10),code,name:String(r[nmI]||code).trim(),
+        shares:+r[shI]||0,cps,amount,payDate:String(r[payI]||'').slice(0,10),status
+      };
+    });
+    _sc('divtw',dividendsTW);
+    if(document.getElementById('panel-dividends').classList.contains('on'))renderDividends();
+    renderXirrMetric();
+  }catch(e){console.error('loadTWDividends',e);}
 }
 
 async function loadUSDividends(twRecs){
@@ -1890,11 +1986,14 @@ function renderDivTable(records){
     const cur=r.currency==='TWD'?'NT$':'$';
     const dateStr=String(r.date).slice(0,10).replace(/-/g,'/');
     const nameHtml=r.name&&r.name!==r.ticker?`<span class="d-name">${r.name}</span>`:'';
+    const isUpcoming=r.status==='upcoming';
+    const badgeCls=isUpcoming?'upcoming':(isDividend?'div':'wht');
+    const badgeTxt=isUpcoming?'已公告':(isDividend?'現金股利':'預扣稅');
     return `<div class="d-card ${isDividend?'div-type':'wht-type'}">
   <div class="d-card-inner">
     <div class="d-row1">
       <div class="d-row1-left">
-        <span class="dbadge ${isDividend?'div':'wht'}">${isDividend?'現金股利':'預扣稅'}</span>
+        <span class="dbadge ${badgeCls}">${badgeTxt}</span>
         <span class="d-ticker">${r.ticker}</span>
         ${nameHtml}
       </div>
