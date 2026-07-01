@@ -578,6 +578,42 @@ body{
 .hld-tbl td.neu{color:#8E8E93}
 .hld-ticker{font-size:1rem;font-weight:800;color:#007AFF;font-family:'Courier New',monospace;display:block}
 .hld-sname{font-size:.8rem;color:#636366;font-weight:600;display:block;margin-top:2px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hld-name-td{min-width:130px}
+.hld-spark{margin-top:5px;line-height:0;opacity:.9}
+.hld-spark svg{display:block}
+
+/* ── K-CHART EXPAND ROW ── */
+.k-expand-row>td{
+  padding:0!important;background:#F5F7FB!important;
+  border-bottom:2px solid #E0E5F0!important;
+  box-shadow:none!important;
+}
+.k-expand-inner{padding:10px 10px 14px}
+.k-charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:560px){.k-charts-grid{grid-template-columns:1fr}}
+.k-chart-block{
+  background:#fff;border-radius:12px;
+  padding:10px 10px 8px;
+  box-shadow:0 1px 5px rgba(0,0,0,.08);
+  overflow:hidden;
+}
+.k-chart-label{
+  font-size:.78rem;font-weight:800;color:#48484A;
+  margin-bottom:6px;display:flex;align-items:center;gap:6px;
+}
+.k-chart-range{font-weight:500;color:#8E8E93;font-size:.72rem}
+.k-canvas{width:100%;height:160px;display:block;cursor:default}
+.k-loading,.k-error{
+  height:160px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  color:#8E8E93;font-size:.82rem;gap:4px;
+}
+.k-error span:last-child{font-size:.7rem;color:#C7C7CC;text-align:center}
+/* Highlighted expanded row */
+.hld-tbl tr.k-row-expanded td{background:#EEF3FF!important}
+.hld-tbl tr.k-row-expanded td:first-child{background:#EEF3FF!important}
+/* Clickable rows */
+#hld-body tr:not(.k-expand-row){cursor:pointer}
 </style>
 </head>
 <body>
@@ -808,6 +844,8 @@ let dividendsTW=[];
 let hidden=false;
 let holdingsSortCol='mv',holdingsSortDir='desc';
 let holdingsTabMode='today';
+let stockIndivHistory={};   // code → [{d,price}]
+let expandedStock=null;
 const HLD_TABS={
   today:{cols:[{key:'price',label:'最後價'},{key:'dayPct',label:'變化%'},{key:'dayAmt',label:'盈虧$'}],defaultSort:'dayAmt'},
   pnl:  {cols:[{key:'unrealPct',label:'未實現%'},{key:'unreal',label:'未實現$'},{key:'avg',label:'均價'}],defaultSort:'unrealPct'},
@@ -955,6 +993,16 @@ async function fetchPrevClose(){
     const useRow=prevRow||rows[0];
     hdr.forEach((c,i)=>{if(!/^\d{4}$/.test(c))return;const v=+String(useRow[i]||'').replace(/[^\d.\-]/g,'');if(!isNaN(v)&&v>0)map[c]=v;});
     if(res.prices)Object.entries(res.prices).forEach(([c,p])=>{const code=String(c).padStart(4,'0');if(+p>0)map[code]=+p;});
+    // Build per-stock closing price history for sparklines
+    hdr.forEach((c,i)=>{
+      if(!/^\d{4}$/.test(c))return;
+      const hist=rows.map(r=>{
+        const d=String(r[0]).slice(0,10);
+        const p=+String(r[i]||'').replace(/[^\d.\-]/g,'');
+        return {d,price:p};
+      }).filter(r=>r.d&&r.price>0).sort((a,b)=>a.d.localeCompare(b.d));
+      if(hist.length)stockIndivHistory[c]=hist;
+    });
   }catch(_){}
   return map;
 }
@@ -983,6 +1031,18 @@ async function fetchPrevCloseUS(){
       if(!col||col==='DATE')return;
       const v=+String(prevRow[i]||'').replace(/[^\d.\-]/g,'');
       if(!isNaN(v)&&v>0)map[col]=v;
+    });
+    // Build per-US-stock closing price history for sparklines
+    const _benchPat=/^(QQQ|SPY|S&P500|NASDAQ|NDX|IXIC|GSPC|SPX|DATE)$/i;
+    hdr.forEach((col,i)=>{
+      if(!col||_benchPat.test(col))return;
+      const hist=rows.map(r=>{
+        const raw=r[0];
+        const d=(raw instanceof Date?raw.toISOString():String(raw)).slice(0,10);
+        const p=+String(r[i]||'').replace(/[^\d.\-]/g,'');
+        return {d,price:p};
+      }).filter(r=>r.d&&r.price>0).sort((a,b)=>a.d.localeCompare(b.d));
+      if(hist.length)stockIndivHistory[col]=hist;
     });
   }catch(_){}
   return map;
@@ -1379,6 +1439,158 @@ function sortHoldings(col){
   renderHoldingsTable();
 }
 
+/* ════════════════════════════════════════════
+   SPARKLINE & K-CHART
+════════════════════════════════════════════ */
+function sparklineSVG(code,isUS){
+  const pts=stockIndivHistory[code];
+  if(!pts||pts.length<3)return '';
+  const last=pts.slice(-40);
+  const prices=last.map(p=>p.price);
+  const mn=Math.min(...prices),mx=Math.max(...prices),rng=mx-mn||1;
+  const W=72,H=26,pad=2;
+  const x=i=>pad+(i/(prices.length-1))*(W-pad*2);
+  const y=p=>H-pad-((p-mn)/rng)*(H-pad*2);
+  const d=prices.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
+  const trend=prices[prices.length-1]-prices[0];
+  const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
+  return `<div class="hld-spark"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg></div>`;
+}
+
+function toggleStockExpand(code,mkt){
+  const wasExpanded=expandedStock===code;
+  // Remove any existing expand rows and highlights
+  document.querySelectorAll('.k-expand-row').forEach(r=>r.remove());
+  document.querySelectorAll('.k-row-expanded').forEach(r=>r.classList.remove('k-row-expanded'));
+  expandedStock=null;
+  if(wasExpanded)return;
+
+  expandedStock=code;
+  const triggerRow=document.querySelector(`#hld-body tr[data-code="${code}"]`);
+  if(!triggerRow)return;
+  triggerRow.classList.add('k-row-expanded');
+
+  const colCount=triggerRow.children.length;
+  const isUS=mkt==='US';
+  const expandRow=document.createElement('tr');
+  expandRow.id='k-xrow-'+code;
+  expandRow.className='k-expand-row';
+  expandRow.innerHTML=`<td colspan="${colCount}"><div class="k-expand-inner"><div class="k-charts-grid">`+
+    `<div class="k-chart-block"><div class="k-chart-label">日K <span class="k-chart-range">近3個月</span></div><div id="kd-${code}" class="k-loading">載入中...</div></div>`+
+    `<div class="k-chart-block"><div class="k-chart-label">周K <span class="k-chart-range">近1年</span></div><div id="kw-${code}" class="k-loading">載入中...</div></div>`+
+    `</div></div></td>`;
+  triggerRow.after(expandRow);
+
+  const yfSym=isUS?code:code+'.TW';
+  Promise.all([
+    fetchYahooOHLC(yfSym,'1d','3mo').catch(()=>null),
+    fetchYahooOHLC(yfSym,'1wk','1y').catch(()=>null),
+  ]).then(([daily,weekly])=>{
+    const hist=stockIndivHistory[code]||[];
+    renderKPanel('kd-'+code,daily,hist,'daily',isUS);
+    renderKPanel('kw-'+code,weekly,hist,'weekly',isUS);
+  });
+}
+
+async function fetchYahooOHLC(sym,interval,range){
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}&includePrePost=false`;
+  const r=await fetch(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(8000)});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const json=await r.json();
+  const res=json.chart?.result?.[0];
+  if(!res)throw new Error('no data');
+  const ts=res.timestamp;
+  const {open:o,high:h,low:l,close:c}=res.indicators.quote[0];
+  return ts.map((t,i)=>({d:new Date(t*1000).toISOString().slice(0,10),o:o[i],h:h[i],l:l[i],c:c[i]}))
+           .filter(r=>r.o!=null&&r.h!=null&&r.l!=null&&r.c!=null);
+}
+
+function renderKPanel(containerId,ohlc,fallbackPts,period,isUS){
+  const wrap=document.getElementById(containerId);
+  if(!wrap)return;
+  if(ohlc&&ohlc.length>3){
+    wrap.className='';
+    wrap.innerHTML='<canvas class="k-canvas"></canvas>';
+    drawCandlestick(wrap.querySelector('canvas'),ohlc,isUS);
+  } else if(fallbackPts&&fallbackPts.length>3){
+    wrap.className='';
+    wrap.innerHTML='<canvas class="k-canvas"></canvas>';
+    const canvas=wrap.querySelector('canvas');
+    let pts=fallbackPts;
+    if(period==='weekly'){
+      const wkMap={};
+      pts.forEach(({d,price})=>{
+        const dt=new Date(d);dt.setDate(dt.getDate()-dt.getDay());
+        const k=dt.toISOString().slice(0,10);wkMap[k]=price;
+      });
+      pts=Object.entries(wkMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,price])=>({d,price}));
+    }
+    const cutDate=new Date(Date.now()-(period==='weekly'?365:90)*86400000).toISOString().slice(0,10);
+    drawLineK(canvas,pts.filter(p=>p.d>=cutDate),isUS);
+  } else {
+    wrap.className='k-error';
+    wrap.innerHTML='<span>無法載入行情</span><span>請確認網路連線</span>';
+  }
+}
+
+function drawCandlestick(canvas,data,isUS){
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.offsetWidth||canvas.parentElement?.offsetWidth||300;
+  const H=160;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  const upC=isUS?'#34C759':'#FF3B30', dnC=isUS?'#FF3B30':'#34C759';
+  const ml=2,mr=2,mt=6,mb=20,cW=W-ml-mr,cH=H-mt-mb;
+  const highs=data.map(d=>d.h),lows=data.map(d=>d.l);
+  const maxP=Math.max(...highs),minP=Math.min(...lows),pRng=maxP-minP||1;
+  const toX=i=>ml+(i+0.5)/data.length*cW;
+  const toY=p=>mt+(1-(p-minP)/pRng)*cH;
+  const cw=Math.max(1,cW/data.length*0.65);
+  // Grid lines
+  ctx.strokeStyle='#E5E5EA';ctx.lineWidth=0.5;
+  [0,1,2,3].forEach(i=>{const y=mt+i/3*cH;ctx.beginPath();ctx.moveTo(ml,y);ctx.lineTo(W-mr,y);ctx.stroke();});
+  // Candles
+  data.forEach((d,i)=>{
+    const x=toX(i),isUp=d.c>=d.o,col=isUp?upC:dnC;
+    ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=Math.max(1,cw>4?1.2:0.8);
+    // Wick
+    ctx.beginPath();ctx.moveTo(x,toY(d.h));ctx.lineTo(x,toY(d.l));ctx.stroke();
+    // Body
+    const bt=Math.min(toY(d.o),toY(d.c)),bh=Math.max(1,Math.abs(toY(d.o)-toY(d.c)));
+    if(isUp){ctx.strokeRect(x-cw/2,bt,cw,bh);}else{ctx.fillRect(x-cw/2,bt,cw,bh);}
+  });
+  // Date labels
+  ctx.fillStyle='#8E8E93';ctx.textAlign='center';ctx.font='9px -apple-system,sans-serif';
+  const step=Math.max(1,Math.floor(data.length/4));
+  for(let i=0;i<data.length;i+=step)ctx.fillText(data[i].d.slice(5),toX(i),H-4);
+}
+
+function drawLineK(canvas,pts,isUS){
+  if(!pts||!pts.length)return;
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.offsetWidth||canvas.parentElement?.offsetWidth||300;
+  const H=160;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  const ctx=canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  const ml=2,mr=2,mt=6,mb=20,cW=W-ml-mr,cH=H-mt-mb;
+  const prices=pts.map(p=>p.price);
+  const mn=Math.min(...prices),mx=Math.max(...prices),pRng=mx-mn||1;
+  const toX=i=>ml+(i/(pts.length-1||1))*cW;
+  const toY=p=>mt+(1-(p-mn)/pRng)*cH;
+  const trend=prices[prices.length-1]-prices[0];
+  const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
+  ctx.strokeStyle='#E5E5EA';ctx.lineWidth=0.5;
+  [0,1,2,3].forEach(i=>{const y=mt+i/3*cH;ctx.beginPath();ctx.moveTo(ml,y);ctx.lineTo(W-mr,y);ctx.stroke();});
+  ctx.beginPath();
+  pts.forEach(({price},i)=>{i?ctx.lineTo(toX(i),toY(price)):ctx.moveTo(toX(i),toY(price));});
+  ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.stroke();
+  ctx.fillStyle='#8E8E93';ctx.textAlign='center';ctx.font='9px -apple-system,sans-serif';
+  const step=Math.max(1,Math.floor(pts.length/4));
+  for(let i=0;i<pts.length;i+=step)ctx.fillText(pts[i].d.slice(5),toX(i),H-4);
+}
+
 function renderHoldingsTable(){
   const mkt=currentPortfolio;
   let stocks=[];
@@ -1463,8 +1675,9 @@ function renderHoldingsTable(){
     }
   }
 
-  tbody.innerHTML=rows.map(r=>`<tr>
-    <td class="l"><span class="hld-ticker">${r.s.code}</span><span class="hld-sname">${r.s.name}</span></td>
+  expandedStock=null;
+  tbody.innerHTML=rows.map(r=>`<tr class="hld-row" data-code="${r.s.code}" data-mkt="${r.s.mkt}" onclick="toggleStockExpand('${r.s.code}','${r.s.mkt}')">
+    <td class="l hld-name-td"><span class="hld-ticker">${r.s.code}</span><span class="hld-sname">${r.s.name}</span>${sparklineSVG(r.s.code,r.isUS)}</td>
     ${cols.map(c=>cell(c.key,r)).join('')}
   </tr>`).join('');
 
