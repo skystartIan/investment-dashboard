@@ -845,7 +845,9 @@ let hidden=false;
 let holdingsSortCol='mv',holdingsSortDir='desc';
 let holdingsTabMode='today';
 let stockIndivHistory={};   // code → [{d,price}]
+let stockIntradayPrices={};  // code → [close, close, ...]  (5-min intraday)
 let expandedStock=null;
+let _intradayFetchDone=false;
 const HLD_TABS={
   today:{cols:[{key:'price',label:'最後價'},{key:'dayPct',label:'變化%'},{key:'dayAmt',label:'盈虧$'}],defaultSort:'dayAmt'},
   pnl:  {cols:[{key:'unrealPct',label:'未實現%'},{key:'unreal',label:'未實現$'},{key:'avg',label:'均價'}],defaultSort:'unrealPct'},
@@ -1303,6 +1305,7 @@ function sw(id){
 
 function setPortfolio(p){
   currentPortfolio=p;
+  _intradayFetchDone=false; // refetch intraday for new market
   ['TW','US'].forEach(m=>document.getElementById('pt-'+m).classList.toggle('on',m===p));
   const bcSep=document.getElementById('bc-sep');
   const bcCur=document.getElementById('bc-cur');
@@ -1442,19 +1445,63 @@ function sortHoldings(col){
 /* ════════════════════════════════════════════
    SPARKLINE & K-CHART
 ════════════════════════════════════════════ */
-function sparklineSVG(code,isUS){
-  const pts=stockIndivHistory[code];
-  if(!pts||pts.length<3)return '';
-  const last=pts.slice(-40);
-  const prices=last.map(p=>p.price);
-  const mn=Math.min(...prices),mx=Math.max(...prices),rng=mx-mn||1;
+function buildSparkSVG(prices,prevClose,isUS){
   const W=72,H=26,pad=2;
-  const x=i=>pad+(i/(prices.length-1))*(W-pad*2);
+  const allP=prevClose>0?[...prices,prevClose]:prices;
+  const mn=Math.min(...allP),mx=Math.max(...allP),rng=mx-mn||1;
+  const x=i=>pad+(i/(prices.length-1||1))*(W-pad*2);
   const y=p=>H-pad-((p-mn)/rng)*(H-pad*2);
   const d=prices.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
   const trend=prices[prices.length-1]-prices[0];
   const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
-  return `<div class="hld-spark"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg></div>`;
+  const prevLine=prevClose>0
+    ?`<line x1="${pad}" y1="${y(prevClose).toFixed(1)}" x2="${W-pad}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="0.8" stroke-dasharray="2,2"/>`
+    :'';
+  return `<div class="hld-spark"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${prevLine}<path d="${d}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg></div>`;
+}
+
+function sparklineSVG(code,isUS){
+  const prev=isUS?prevPricesUS[code]:prevPrices[code];
+  const intra=stockIntradayPrices[code];
+  if(intra&&intra.length>=3)return buildSparkSVG(intra,prev,isUS);
+  const hist=stockIndivHistory[code];
+  if(!hist||hist.length<3)return '';
+  return buildSparkSVG(hist.slice(-40).map(p=>p.price),prev,isUS);
+}
+
+async function fetchYahooIntraday(sym){
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=false`;
+  const r=await fetch(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(7000)});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const json=await r.json();
+  const res=json.chart?.result?.[0];
+  if(!res)throw new Error('no data');
+  const c=res.indicators.quote[0].close;
+  return (res.timestamp||[]).map((_,i)=>c[i]).filter(p=>p!=null);
+}
+
+function updateSparklineDOM(code,isUS){
+  const td=document.querySelector(`#hld-body tr[data-code="${code}"] td.hld-name-td`);
+  if(!td)return;
+  const svg=sparklineSVG(code,isUS);
+  const old=td.querySelector('.hld-spark');
+  if(old)old.outerHTML=svg||'';
+  else if(svg)td.insertAdjacentHTML('beforeend',svg);
+}
+
+async function fetchAllSparklines(){
+  const mkt=currentPortfolio;
+  const stocks=[];
+  if(mkt==='TW'||mkt==='ALL')stocks.push(...stockData.filter(s=>s.mkt==='TW').map(s=>({code:s.code,mkt:'TW'})));
+  if(mkt==='US'||mkt==='ALL')stocks.push(...usStockData.map(s=>({code:s.code,mkt:'US'})));
+  await Promise.allSettled(stocks.map(async({code,mkt:m})=>{
+    if(stockIntradayPrices[code])return; // already fetched
+    const sym=m==='TW'?code+'.TW':code;
+    try{
+      const prices=await fetchYahooIntraday(sym);
+      if(prices.length>=3){stockIntradayPrices[code]=prices;updateSparklineDOM(code,m==='US');}
+    }catch(_){}
+  }));
 }
 
 function toggleStockExpand(code,mkt){
@@ -1476,14 +1523,14 @@ function toggleStockExpand(code,mkt){
   expandRow.id='k-xrow-'+code;
   expandRow.className='k-expand-row';
   expandRow.innerHTML=`<td colspan="${colCount}"><div class="k-expand-inner"><div class="k-charts-grid">`+
-    `<div class="k-chart-block"><div class="k-chart-label">日K <span class="k-chart-range">近3個月</span></div><div id="kd-${code}" class="k-loading">載入中...</div></div>`+
+    `<div class="k-chart-block"><div class="k-chart-label">日K <span class="k-chart-range">近6個月</span></div><div id="kd-${code}" class="k-loading">載入中...</div></div>`+
     `<div class="k-chart-block"><div class="k-chart-label">周K <span class="k-chart-range">近1年</span></div><div id="kw-${code}" class="k-loading">載入中...</div></div>`+
     `</div></div></td>`;
   triggerRow.after(expandRow);
 
   const yfSym=isUS?code:code+'.TW';
   Promise.all([
-    fetchYahooOHLC(yfSym,'1d','3mo').catch(()=>null),
+    fetchYahooOHLC(yfSym,'1d','6mo').catch(()=>null),
     fetchYahooOHLC(yfSym,'1wk','1y').catch(()=>null),
   ]).then(([daily,weekly])=>{
     const hist=stockIndivHistory[code]||[];
@@ -1525,7 +1572,7 @@ function renderKPanel(containerId,ohlc,fallbackPts,period,isUS){
       });
       pts=Object.entries(wkMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,price])=>({d,price}));
     }
-    const cutDate=new Date(Date.now()-(period==='weekly'?365:90)*86400000).toISOString().slice(0,10);
+    const cutDate=new Date(Date.now()-(period==='weekly'?365:180)*86400000).toISOString().slice(0,10);
     drawLineK(canvas,pts.filter(p=>p.d>=cutDate),isUS);
   } else {
     wrap.className='k-error';
@@ -1685,6 +1732,12 @@ function renderHoldingsTable(){
   tbody.classList.remove('hld-fade');
   void tbody.offsetWidth; // force reflow
   tbody.classList.add('hld-fade');
+
+  // Fetch intraday prices once per portfolio load and update sparklines
+  if(!_intradayFetchDone){
+    _intradayFetchDone=true;
+    fetchAllSparklines();
+  }
 }
 
 /* ════════════════════════════════════════════
