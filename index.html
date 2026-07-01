@@ -614,6 +614,33 @@ body{
 .hld-tbl tr.k-row-expanded td:first-child{background:#EEF3FF!important}
 /* Clickable rows */
 #hld-body tr:not(.k-expand-row){cursor:pointer}
+
+/* ── TREND TAB GRID (走勢 tab inside hld-wrap) ── */
+.trend-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 12px 14px}
+@media(max-width:560px){.trend-grid{grid-template-columns:1fr}}
+.trend-card{background:#fff;border-radius:12px;padding:9px 10px 8px;box-shadow:0 1px 4px rgba(0,0,0,.07);overflow:hidden}
+.trend-card-hdr{display:flex;align-items:baseline;gap:5px;margin-bottom:4px;flex-wrap:nowrap}
+.trend-card-ticker{font-size:.88rem;font-weight:800;color:#007AFF;font-family:'Courier New',monospace;white-space:nowrap}
+.trend-card-name{font-size:.72rem;color:#636366;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.trend-card-chg{font-size:.78rem;font-weight:700;white-space:nowrap}
+.trend-chart-wrap{width:100%;height:130px}
+.trend-chart-wrap canvas{width:100%;height:100%;display:block}
+
+/* ── CHARTS PAGE (多股圖) ── */
+.charts-pg-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.charts-pg-title{font-size:1rem;font-weight:800;color:#1C1C1E}
+.cpt-wrap{display:flex;background:#F2F2F7;border-radius:8px;padding:2px;gap:2px}
+.cpt-btn{border:none;background:transparent;border-radius:6px;padding:6px 16px;font-size:.82rem;font-weight:700;color:#636366;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent}
+.cpt-btn.on{background:#fff;color:#1C1C1E;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:560px){.charts-grid{grid-template-columns:1fr}}
+.charts-card{background:#fff;border-radius:12px;padding:10px 10px 8px;box-shadow:0 1px 5px rgba(0,0,0,.08);overflow:hidden}
+.charts-card-hdr{display:flex;align-items:baseline;gap:6px;margin-bottom:2px}
+.charts-card-ticker{font-size:.95rem;font-weight:800;color:#007AFF;font-family:'Courier New',monospace;white-space:nowrap}
+.charts-card-name{font-size:.75rem;color:#636366;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.charts-card-chg{font-size:.82rem;font-weight:700;white-space:nowrap}
+.charts-card-sub{font-size:.72rem;color:#8E8E93;margin-bottom:5px}
+.charts-chart-wrap{width:100%;height:160px}
 </style>
 </head>
 <body>
@@ -741,6 +768,7 @@ body{
         <button class="hld-tab on" data-tab="today" onclick="switchHoldingsTab('today')">今日</button>
         <button class="hld-tab" data-tab="pnl" onclick="switchHoldingsTab('pnl')">損益</button>
         <button class="hld-tab" data-tab="alloc" onclick="switchHoldingsTab('alloc')">佔比</button>
+        <button class="hld-tab" data-tab="trend" onclick="switchHoldingsTab('trend')">走勢</button>
       </div>
       <div class="hld-wrap">
         <table class="hld-tbl">
@@ -795,6 +823,20 @@ body{
     </div>
   </div>
 
+  <!-- ═══ CHARTS PAGE (多股圖) ═══ -->
+  <div class="panel" id="panel-charts">
+    <div class="sc">
+      <div class="charts-pg-hdr">
+        <div class="charts-pg-title">多股圖</div>
+        <div class="cpt-wrap">
+          <button class="cpt-btn on" data-p="daily"  onclick="setChartsPeriod('daily',this)">日K</button>
+          <button class="cpt-btn"    data-p="weekly" onclick="setChartsPeriod('weekly',this)">周K</button>
+        </div>
+      </div>
+      <div id="charts-grid-area" class="charts-grid"></div>
+    </div>
+  </div>
+
 </div><!-- /#main -->
 
 <script>
@@ -846,12 +888,15 @@ let holdingsSortCol='mv',holdingsSortDir='desc';
 let holdingsTabMode='today';
 let stockIndivHistory={};   // code → [{d,price}]
 let stockIntradayPrices={};  // code → [close, close, ...]  (5-min intraday)
+let stockOHLCCache={};       // code → {d:[ohlc], w:[ohlc]}
 let expandedStock=null;
 let _intradayFetchDone=false;
+let chartsPeriod='daily';
 const HLD_TABS={
   today:{cols:[{key:'price',label:'最後價'},{key:'dayPct',label:'變化%'},{key:'dayAmt',label:'盈虧$'}],defaultSort:'dayAmt'},
   pnl:  {cols:[{key:'unrealPct',label:'未實現%'},{key:'unreal',label:'未實現$'},{key:'avg',label:'均價'}],defaultSort:'unrealPct'},
   alloc:{cols:[{key:'costPct',label:'成本佔比'},{key:'mv',label:'市場價值'},{key:'navPct',label:'淨清算%'}],defaultSort:'costPct'},
+  trend:{cols:[],defaultSort:'mv'},
 };
 
 /* ════════════════════════════════════════════
@@ -1285,8 +1330,8 @@ function renderXirrMetric(){
 /* ════════════════════════════════════════════
    UI: NAVIGATION
 ════════════════════════════════════════════ */
-const PANEL_NAMES={overview:'總覽',dividends:'股利',lending:'借券',trade:'交易'};
-const PANEL_ORDER=['overview','dividends','lending','trade'];
+const PANEL_NAMES={overview:'總覽',dividends:'股利',lending:'借券',trade:'交易',charts:'多股圖'};
+const PANEL_ORDER=['overview','dividends','lending','trade','charts'];
 function sw(id){
   PANEL_ORDER.forEach(p=>{
     const btn=document.getElementById('bn-'+p);
@@ -1301,6 +1346,7 @@ function sw(id){
   if(id==='dividends')renderDividends();
   if(id==='lending')renderLending();
   if(id==='trade')renderTrades();
+  if(id==='charts')renderChartsPage();
 }
 
 function setPortfolio(p){
@@ -1504,6 +1550,88 @@ async function fetchAllSparklines(){
   }));
 }
 
+/* ════════════════════════════════════════════
+   MULTI-CHART: TREND TAB + CHARTS PAGE
+════════════════════════════════════════════ */
+async function ensureStockOHLC(code,mkt,period){
+  if(!stockOHLCCache[code])stockOHLCCache[code]={};
+  const key=period==='weekly'?'w':'d';
+  if(stockOHLCCache[code][key])return stockOHLCCache[code][key];
+  const sym=mkt==='TW'?code+'.TW':code;
+  const interval=period==='weekly'?'1wk':'1d';
+  const range=period==='weekly'?'1y':'6mo';
+  const data=await fetchYahooOHLC(sym,interval,range).catch(()=>[]);
+  stockOHLCCache[code][key]=data;
+  return data;
+}
+
+async function drawChartCard(code,mkt,containerId,period,isUS){
+  const wrap=document.getElementById(containerId);
+  if(!wrap)return;
+  try{
+    const ohlc=await ensureStockOHLC(code,mkt,period);
+    const fallback=stockIndivHistory[code]||[];
+    renderKPanel(containerId,ohlc.length>3?ohlc:null,fallback,period,isUS);
+  }catch(e){
+    if(wrap){wrap.className='k-error';wrap.innerHTML='<span>無法載入</span>';}
+  }
+}
+
+function renderTrendGrid(rows,container){
+  container.className='trend-grid';
+  container.innerHTML=rows.map(r=>{
+    const chgCls=r.isUS?clsPN(r.dayChgPct||0):clsPNmkt(r.dayChgPct||0,'TW');
+    const chgStr=r.hasPrev?fmtPct(r.dayChgPct):'--';
+    return `<div class="trend-card">
+      <div class="trend-card-hdr">
+        <span class="trend-card-ticker">${r.s.code}</span>
+        <span class="trend-card-name">${r.s.name}</span>
+        <span class="trend-card-chg ${chgCls}">${chgStr}</span>
+      </div>
+      <div id="trd-${r.s.code}" class="trend-chart-wrap k-loading">載入中...</div>
+    </div>`;
+  }).join('');
+  rows.forEach(r=>drawChartCard(r.s.code,r.s.mkt,'trd-'+r.s.code,chartsPeriod,r.isUS));
+}
+
+function renderChartsPage(){
+  const mkt=currentPortfolio;
+  const stocks=[];
+  if(mkt==='TW'||mkt==='ALL')stocks.push(...stockData.filter(s=>s.mkt==='TW'));
+  if(mkt==='US'||mkt==='ALL')stocks.push(...usStockData);
+  const rows=stocks.map(s=>{
+    const isUS=s.mkt==='US';
+    const prev=isUS?prevPricesUS[s.code]:prevPrices[s.code];
+    const hasPrev=prev&&prev>0;
+    const dayChgPct=hasPrev?(s.price-prev)/prev*100:null;
+    return {s,isUS,hasPrev,dayChgPct};
+  });
+  const area=document.getElementById('charts-grid-area');
+  if(!area)return;
+  const cur=r=>r.isUS?'$':'';
+  area.innerHTML=rows.map(r=>{
+    const chgCls=r.isUS?clsPN(r.dayChgPct||0):clsPNmkt(r.dayChgPct||0,'TW');
+    const chgStr=r.hasPrev?fmtPct(r.dayChgPct):'--';
+    return `<div class="charts-card">
+      <div class="charts-card-hdr">
+        <span class="charts-card-ticker">${r.s.code}</span>
+        <span class="charts-card-name">${r.s.name}</span>
+        <span class="charts-card-chg ${chgCls}">${chgStr}</span>
+      </div>
+      <div class="charts-card-sub">${cur(r)}${r.s.price.toLocaleString()}</div>
+      <div id="chp-${r.s.code}" class="charts-chart-wrap k-loading">載入中...</div>
+    </div>`;
+  }).join('');
+  rows.forEach(r=>drawChartCard(r.s.code,r.s.mkt,'chp-'+r.s.code,chartsPeriod,r.isUS));
+}
+
+function setChartsPeriod(p){
+  chartsPeriod=p;
+  document.querySelectorAll('.cpt-btn').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  if(document.getElementById('panel-charts').classList.contains('on'))renderChartsPage();
+  if(holdingsTabMode==='trend')renderHoldingsTable();
+}
+
 function toggleStockExpand(code,mkt){
   const wasExpanded=expandedStock===code;
   // Remove any existing expand rows and highlights
@@ -1555,13 +1683,16 @@ async function fetchYahooOHLC(sym,interval,range){
 function renderKPanel(containerId,ohlc,fallbackPts,period,isUS){
   const wrap=document.getElementById(containerId);
   if(!wrap)return;
+  // Determine canvas height from parent or fallback
+  const h=wrap.offsetHeight>20?wrap.offsetHeight:160;
+  const cvStyle=`width:100%;height:${h}px;display:block;cursor:default`;
   if(ohlc&&ohlc.length>3){
     wrap.className='';
-    wrap.innerHTML='<canvas class="k-canvas"></canvas>';
+    wrap.innerHTML=`<canvas style="${cvStyle}"></canvas>`;
     drawCandlestick(wrap.querySelector('canvas'),ohlc,isUS);
   } else if(fallbackPts&&fallbackPts.length>3){
     wrap.className='';
-    wrap.innerHTML='<canvas class="k-canvas"></canvas>';
+    wrap.innerHTML=`<canvas style="${cvStyle}"></canvas>`;
     const canvas=wrap.querySelector('canvas');
     let pts=fallbackPts;
     if(period==='weekly'){
@@ -1702,6 +1833,26 @@ function renderHoldingsTable(){
     costPct:(a,b)=>dir*(a.costPct-b.costPct),
   };
   rows.sort(sortMap[holdingsSortCol]||sortMap.mv);
+
+  // ── TREND MODE: replace table with K-chart grid ──
+  if(holdingsTabMode==='trend'){
+    document.getElementById('hld-thead-row').innerHTML='';
+    document.querySelector('.hld-tbl').style.display='none';
+    let trendGrid=document.getElementById('hld-trend-grid');
+    if(!trendGrid){
+      trendGrid=document.createElement('div');
+      trendGrid.id='hld-trend-grid';
+      document.querySelector('.hld-wrap').appendChild(trendGrid);
+    }
+    trendGrid.style.display='';
+    renderTrendGrid(rows,trendGrid);
+    if(!_intradayFetchDone){_intradayFetchDone=true;fetchAllSparklines();}
+    return;
+  }
+  // Restore table if switching away from trend
+  document.querySelector('.hld-tbl').style.display='';
+  const _tg=document.getElementById('hld-trend-grid');
+  if(_tg)_tg.style.display='none';
 
   // Cell renderer per column key
   function cell(key,r){
@@ -2413,6 +2564,10 @@ window.addEventListener('scroll',()=>{
   <button class="bn" id="bn-trade" onclick="sw('trade')">
     <svg viewBox="0 0 24 24"><path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/></svg>
     <span>交易</span>
+  </button>
+  <button class="bn" id="bn-charts" onclick="sw('charts')">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    <span>多股圖</span>
   </button>
 </nav>
 </body>
