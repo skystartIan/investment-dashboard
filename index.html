@@ -1520,14 +1520,9 @@ function sparklineSVG(code,isUS){
 }
 
 async function fetchYahooIntraday(sym){
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=5m&range=1d&includePrePost=false`;
-  const r=await fetch(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(7000)});
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  const json=await r.json();
-  const res=json.chart?.result?.[0];
-  if(!res)throw new Error('no data');
-  const c=res.indicators.quote[0].close;
-  return (res.timestamp||[]).map((_,i)=>c[i]).filter(p=>p!=null);
+  const res=await gas({action:'yahoo_chart',symbol:sym,interval:'5m',range:'1d'});
+  if(!res.ok||!res.data?.length)throw new Error('no data');
+  return res.data.map(d=>d.c).filter(p=>p!=null);
 }
 
 function updateSparklineDOM(code,isUS){
@@ -1672,16 +1667,9 @@ function toggleStockExpand(code,mkt){
 }
 
 async function fetchYahooOHLC(sym,interval,range){
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=${interval}&range=${range}&includePrePost=false`;
-  const r=await fetch(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(8000)});
-  if(!r.ok)throw new Error('HTTP '+r.status);
-  const json=await r.json();
-  const res=json.chart?.result?.[0];
-  if(!res)throw new Error('no data');
-  const ts=res.timestamp;
-  const {open:o,high:h,low:l,close:c}=res.indicators.quote[0];
-  return ts.map((t,i)=>({d:new Date(t*1000).toISOString().slice(0,10),o:o[i],h:h[i],l:l[i],c:c[i]}))
-           .filter(r=>r.o!=null&&r.h!=null&&r.l!=null&&r.c!=null);
+  const res=await gas({action:'yahoo_chart',symbol:sym,interval,range});
+  if(!res.ok||!res.data?.length)throw new Error('no data');
+  return res.data;
 }
 
 function renderKPanel(containerId,ohlc,fallbackPts,period,isUS){
