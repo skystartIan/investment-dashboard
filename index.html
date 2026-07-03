@@ -977,10 +977,9 @@ function clsPNmkt(v,mkt){return mkt==='TW'?(v>=0?'pos-tw':'neg-tw'):clsPN(v);}
    GAS
 ════════════════════════════════════════════ */
 async function gas(payload){
-  const r=await fetch(GAS+'?t='+Date.now(),{
-    method:'POST',headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify(payload)
-  });
+  const p=new URLSearchParams(payload);
+  p.set('t',Date.now());
+  const r=await fetch(GAS+'?'+p.toString());
   if(!r.ok)throw new Error('HTTP '+r.status);
   return JSON.parse(await r.text());
 }
