@@ -1545,15 +1545,15 @@ async function fetchAllSparklines(){
   const stocks=[];
   if(mkt==='TW'||mkt==='ALL')stocks.push(...stockData.filter(s=>s.mkt==='TW').map(s=>({code:s.code,mkt:'TW'})));
   if(mkt==='US'||mkt==='ALL')stocks.push(...usStockData.map(s=>({code:s.code,mkt:'US'})));
-  await Promise.allSettled(stocks.map(async({code,mkt:m})=>{
-    if(stockIntradayPrices[code])return;
+  for(const {code,mkt:m} of stocks){
+    if(stockIntradayPrices[code])continue;
     try{
       const prices=m==='TW'
         ? await fetchFugleIntraday(code)
         : await fetchYahooIntraday(code);
       if(prices.length>=3){stockIntradayPrices[code]=prices;updateSparklineDOM(code,m==='US');}
     }catch(_){}
-  }));
+  }
 }
 
 /* ════════════════════════════════════════════
