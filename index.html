@@ -656,6 +656,7 @@ body{
   </div>
   <div class="hdr-right">
     <span id="st1">載入中...</span>
+    <span id="fugle-st" style="font-size:.75rem;color:#636366;white-space:nowrap">富果 檢測中...</span>
     <span class="hdr-fx">匯率 <b id="fx-rate-val">--</b></span>
     <button class="hdr-icon hdr-hide-sm" title="隱藏數字" onclick="toggleHide()">👁</button>
     <button class="btn-new" onclick="refresh()">⚡ 更新</button>
@@ -926,6 +927,24 @@ function restoreCache(){
 /* ════════════════════════════════════════════
    INIT
 ════════════════════════════════════════════ */
+async function checkFugleStatus(){
+  const el=document.getElementById('fugle-st');
+  if(!el)return;
+  try{
+    const res=await gas({action:'fugle_intraday',symbol:'2330'});
+    if(res.ok&&res.data?.length>0){
+      el.textContent='富果 ✅ ('+res.data.length+'筆)';
+      el.style.color='#30D158';
+    } else {
+      el.textContent='富果 ❌ '+(res.error||'no data');
+      el.style.color='#FF453A';
+    }
+  }catch(e){
+    el.textContent='富果 ❌ '+e.message;
+    el.style.color='#FF453A';
+  }
+}
+
 window.addEventListener('load',()=>{
   restoreCache();
   refresh();
@@ -936,6 +955,7 @@ window.addEventListener('load',()=>{
   loadUSBenchmark();
   loadTWHistory();
   fetchPrevCloseUS().then(m=>{if(Object.keys(m).length){prevPricesUS=m;_sc('prevUS',m);renderHoldingsTable();renderHsSummaryMetrics();}}).catch(_=>{});
+  checkFugleStatus();
 });
 
 /* ════════════════════════════════════════════
