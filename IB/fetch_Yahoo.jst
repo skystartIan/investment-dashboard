@@ -1,0 +1,59 @@
+
+// ════════════════════════════════════════════════════════════════
+// Web App 入口（前端 gas() 呼叫此處）
+// 部署方式：部署 → 管理部署 → 新版本 → 任何人可存取
+// ════════════════════════════════════════════════════════════════
+function doPost(e) {
+  try {
+    var payload = JSON.parse(e.postData.contents);
+    var action  = payload.action;
+    var ss      = SpreadsheetApp.getActiveSpreadsheet();
+
+    // ── 讀取試算表 ──────────────────────────────────────────
+    if (action === 'read') {
+      var sheet = ss.getSheetByName(payload.sheet);
+      if (!sheet) return _json({ok: false, error: '找不到工作表: ' + payload.sheet});
+      var values = sheet.getDataRange().getValues();
+      // 把 Date 物件轉成字串，避免 JSON 序列化問題
+      values = values.map(function(row) {
+        return row.map(function(cell) {
+          if (Object.prototype.toString.call(cell) === '[object Date]') {
+            return Utilities.formatDate(cell, 'Asia/Taipei', 'yyyy-MM-dd');
+          }
+          return cell;
+        });
+      });
+      return _json({ok: true, data: values});
+    }
+
+    // ── 匯率 ─────────────────────────────────────────────────
+    if (action === 'get_fx_rate') {
+      return _json(getFxRate());
+    }
+
+    // ── Yahoo Finance K線 / 即時走勢 ──────────────────────────
+    if (action === 'yahoo_chart') {
+      return _json(fetchYahooChart_(
+        payload.symbol,
+        payload.interval || '1d',
+        payload.range    || '6mo'
+      ));
+    }
+
+    // ── Fugle 台股即時盤中 K 線 ────────────────────────────────
+    if (action === 'fugle_intraday') {
+      return _json(fetchFugleIntraday_(payload.symbol));
+    }
+
+    return _json({ok: false, error: 'unknown action: ' + action});
+
+  } catch(err) {
+    return _json({ok: false, error: err.toString()});
+  }
+}
+
+function _json(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
