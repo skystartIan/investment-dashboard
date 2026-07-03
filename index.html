@@ -1515,8 +1515,11 @@ function sparklineSVG(code,isUS){
   if(intra&&intra.length>=3)return buildSparkSVG(intra,prev,isUS,true);
   const hist=stockIndivHistory[code];
   if(!hist||hist.length<3)return '';
-  // Fallback: last 5 trading-day closes (CORS blocked intraday)
-  return buildSparkSVG(hist.slice(-5).map(p=>p.price),prev,isUS,false);
+  // Fallback: last 4 closes + 今天最新價（含今日大漲）
+  const stock=(isUS?usStockData:stockData).find(s=>s.code===code);
+  const pts=hist.slice(-4).map(p=>p.price);
+  if(stock?.price>0)pts.push(stock.price);
+  return buildSparkSVG(pts,prev,isUS,false);
 }
 
 async function fetchFugleIntraday(symbol){
