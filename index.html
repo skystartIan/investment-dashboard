@@ -1387,6 +1387,7 @@ function setPortfolio(p){
   bcCur.textContent=p==='TW'?'🇹🇼 台股':'🇺🇸 美股';
   renderOverview();
   if(document.getElementById('panel-dividends').classList.contains('on'))renderDividends();
+  if(document.getElementById('panel-charts').classList.contains('on'))renderChartsPage();
 }
 
 function toggleHide(){
