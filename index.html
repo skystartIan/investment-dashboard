@@ -1512,21 +1512,27 @@ function sortHoldings(col){
    SPARKLINE & K-CHART
 ════════════════════════════════════════════ */
 function buildSparkSVG(prices,prevClose,isUS,isIntraday){
-  const W=72,H=26,pad=2;
+  const H=26,pad=2,lblW=24,W=72+lblW; // 右側留空間標上下限
+  const plotW=W-pad*2-lblW;
   const allP=prevClose>0?[...prices,prevClose]:prices;
   const mn=Math.min(...allP),mx=Math.max(...allP),rng=mx-mn||1;
-  const x=i=>pad+(i/(prices.length-1||1))*(W-pad*2);
+  const x=i=>pad+(i/(prices.length-1||1))*plotW;
   const y=p=>H-pad-((p-mn)/rng)*(H-pad*2);
   const d=prices.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
   const trend=prices[prices.length-1]-prices[0];
   const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
   const prevLine=prevClose>0
-    ?`<line x1="${pad}" y1="${y(prevClose).toFixed(1)}" x2="${W-pad}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="0.8" stroke-dasharray="2,2"/>`
+    ?`<line x1="${pad}" y1="${y(prevClose).toFixed(1)}" x2="${(pad+plotW).toFixed(1)}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="0.8" stroke-dasharray="2,2"/>`
     :'';
-  // Show "5D" label when falling back to 5-day historical closes
+  // 上下限：當日最高（上）/ 最低（下）
+  const pMax=Math.max(...prices),pMin=Math.min(...prices);
+  const bounds=
+    `<text x="${W-1}" y="7" text-anchor="end" font-size="6" fill="#8E8E93" font-family="-apple-system,sans-serif">${fmtAxis(pMax)}</text>`+
+    `<text x="${W-1}" y="${H-2}" text-anchor="end" font-size="6" fill="#8E8E93" font-family="-apple-system,sans-serif">${fmtAxis(pMin)}</text>`;
+  // 退回 5 日日線時標 "5D"
   const tag=isIntraday?'':
-    `<text x="${W-pad}" y="${H-1}" text-anchor="end" font-size="6" fill="#C7C7CC" font-family="-apple-system,sans-serif">5D</text>`;
-  return `<div class="hld-spark"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${prevLine}<path d="${d}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${tag}</svg></div>`;
+    `<text x="${(pad+plotW).toFixed(1)}" y="${H-1}" text-anchor="end" font-size="6" fill="#C7C7CC" font-family="-apple-system,sans-serif">5D</text>`;
+  return `<div class="hld-spark"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${prevLine}<path d="${d}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${bounds}${tag}</svg></div>`;
 }
 
 function sparklineSVG(code,isUS){
@@ -1618,6 +1624,17 @@ function lastPriceOf(code,isUS){
   const s=(isUS?usStockData:stockData).find(x=>x.code===code);
   return s&&s.price>0?s.price:null;
 }
+// 單檔未實現損益（與持倉表算法一致）
+function calcUnreal(s,isUS){
+  const fees=isUS?0:(tradeFees[s.code]||0);
+  const costBasis=s.sheetCost&&s.sheetCost>0?s.sheetCost:(s.avg*s.sh+fees);
+  const mv=s.sh*s.price;
+  let unrealized;
+  if(isUS)unrealized=s.ibPnl!=null?s.ibPnl:mv-s.avg*s.sh;
+  else unrealized=s.sheetUnreal!=null?s.sheetUnreal:mv-costBasis;
+  const unrealPct=costBasis>0?unrealized/costBasis*100:0;
+  return {unrealized,unrealPct};
+}
 
 async function drawChartCard(code,mkt,containerId,period,isUS){
   const wrap=document.getElementById(containerId);
@@ -1664,24 +1681,22 @@ function renderChartsPage(){
   if(mkt==='US'||mkt==='ALL')stocks.push(...usStockData);
   const rows=stocks.map(s=>{
     const isUS=s.mkt==='US';
-    const prev=isUS?prevPricesUS[s.code]:prevPrices[s.code];
-    const hasPrev=prev&&prev>0;
-    const dayChgPct=hasPrev?(s.price-prev)/prev*100:null;
-    return {s,isUS,hasPrev,dayChgPct};
+    const {unrealized,unrealPct}=calcUnreal(s,isUS);
+    return {s,isUS,unrealized,unrealPct};
   });
   const area=document.getElementById('charts-grid-area');
   if(!area)return;
-  const cur=r=>r.isUS?'$':'';
+  const cur=isUS=>isUS?'$':'';
   area.innerHTML=rows.map(r=>{
-    const chgCls=r.isUS?clsPN(r.dayChgPct||0):clsPNmkt(r.dayChgPct||0,'TW');
-    const chgStr=r.hasPrev?fmtPct(r.dayChgPct):'--';
+    const urCls=r.isUS?clsPN(r.unrealPct||0):clsPNmkt(r.unrealPct||0,'TW');
+    const urVal=(r.unrealized>=0?'+':'−')+cur(r.isUS)+Math.abs(Math.round(r.unrealized)).toLocaleString();
     return `<div class="charts-card">
       <div class="charts-card-hdr">
         <span class="charts-card-ticker">${r.s.code}</span>
         <span class="charts-card-name">${r.s.name}</span>
-        <span class="charts-card-chg ${chgCls}">${chgStr}</span>
+        <span class="charts-card-chg ${urCls}">${fmtPct(r.unrealPct||0)} <span class="trend-card-urval">${urVal}</span></span>
       </div>
-      <div class="charts-card-sub">${cur(r)}${r.s.price.toLocaleString()}</div>
+      <div class="charts-card-sub">${cur(r.isUS)}${r.s.price.toLocaleString()}</div>
       <div id="chp-${r.s.code}" class="charts-chart-wrap k-loading">載入中...</div>
     </div>`;
   }).join('');
