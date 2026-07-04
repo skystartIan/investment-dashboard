@@ -965,6 +965,7 @@ window.addEventListener('load',()=>{
   loadTWHistory();
   fetchPrevCloseUS().then(m=>{if(Object.keys(m).length){prevPricesUS=m;_sc('prevUS',m);renderHoldingsTable();renderHsSummaryMetrics();}}).catch(_=>{});
   checkFugleStatus();
+  loadKCache(); // 預載每日日K/周K快取
 });
 
 /* ════════════════════════════════════════════
@@ -1606,6 +1607,24 @@ async function fetchAllSparklines(){
 /* ════════════════════════════════════════════
    MULTI-CHART: TREND TAB + CHARTS PAGE
 ════════════════════════════════════════════ */
+let kcacheLoaded=false;
+// 一次讀回每日盤後預抓的日K/周K，填入 stockOHLCCache（大幅加速、避開 Yahoo 限流）
+async function loadKCache(){
+  if(kcacheLoaded)return;
+  try{
+    const res=await gas({action:'read_kcache'});
+    if(res.ok&&res.data){
+      Object.keys(res.data).forEach(code=>{
+        const o=res.data[code];
+        if(!stockOHLCCache[code])stockOHLCCache[code]={};
+        if(o.d&&o.d.length>3)stockOHLCCache[code].d=o.d;
+        if(o.w&&o.w.length>3)stockOHLCCache[code].w=o.w;
+      });
+      kcacheLoaded=true;
+    }
+  }catch(_){}
+}
+
 async function ensureStockOHLC(code,mkt,period){
   if(!stockOHLCCache[code])stockOHLCCache[code]={};
   const key=period==='weekly'?'w':'d';
@@ -1757,13 +1776,13 @@ function toggleStockExpand(code,mkt){
   triggerRow.after(expandRow);
 
   Promise.all([
-    fetchOHLCsmart(code,mkt,'1d','6mo'),
-    fetchOHLCsmart(code,mkt,'1wk','1y'),
+    ensureStockOHLC(code,mkt,'daily'),
+    ensureStockOHLC(code,mkt,'weekly'),
   ]).then(([daily,weekly])=>{
     const hist=stockIndivHistory[code]||[];
     const avg=avgCostOf(code,isUS),last=lastPriceOf(code,isUS);
-    renderKPanel('kd-'+code,daily,hist,'daily',isUS,avg,last);
-    renderKPanel('kw-'+code,weekly,hist,'weekly',isUS,avg,last);
+    renderKPanel('kd-'+code,daily&&daily.length>3?daily:null,hist,'daily',isUS,avg,last);
+    renderKPanel('kw-'+code,weekly&&weekly.length>3?weekly:null,hist,'weekly',isUS,avg,last);
   });
 }
 
