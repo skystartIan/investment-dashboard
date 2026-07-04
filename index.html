@@ -642,12 +642,12 @@ body{
 @media(max-width:560px){.charts-grid{grid-template-columns:1fr 1fr;gap:6px}
   .charts-card{padding:7px 6px 6px}
   .charts-chart-wrap{height:120px}
-  .charts-card-name{display:none}}
+  .charts-card-chg{font-size:.78rem}}
 .charts-card{background:#fff;border-radius:12px;padding:10px 10px 8px;box-shadow:0 1px 5px rgba(0,0,0,.08);overflow:hidden}
-.charts-card-hdr{display:flex;align-items:baseline;gap:6px;margin-bottom:2px}
+.charts-card-hdr{display:flex;align-items:baseline;gap:5px;margin-bottom:1px}
 .charts-card-ticker{font-size:.95rem;font-weight:800;color:#007AFF;font-family:'Courier New',monospace;white-space:nowrap}
 .charts-card-name{font-size:.75rem;color:#636366;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.charts-card-chg{font-size:.82rem;font-weight:700;white-space:nowrap}
+.charts-card-chg{font-size:.82rem;font-weight:700;white-space:nowrap;margin-bottom:1px}
 .charts-card-sub{font-size:.72rem;color:#8E8E93;margin-bottom:5px}
 .charts-chart-wrap{width:100%;height:160px}
 </style>
@@ -1702,8 +1702,8 @@ function renderChartsPage(){
       <div class="charts-card-hdr">
         <span class="charts-card-ticker">${r.s.code}</span>
         <span class="charts-card-name">${r.s.name}</span>
-        <span class="charts-card-chg ${urCls}">${fmtPct(r.unrealPct||0)} <span class="trend-card-urval">${urVal}</span></span>
       </div>
+      <div class="charts-card-chg ${urCls}">${fmtPct(r.unrealPct||0)} <span class="trend-card-urval">${urVal}</span></div>
       <div class="charts-card-sub">${cur(r.isUS)}${r.s.price.toLocaleString()}</div>
       <div id="chp-${r.s.code}" class="charts-chart-wrap k-loading">載入中...</div>
     </div>`;
