@@ -1704,7 +1704,6 @@ function renderChartsPage(){
         <span class="charts-card-name">${r.s.name}</span>
       </div>
       <div class="charts-card-chg ${urCls}">${fmtPct(r.unrealPct||0)} <span class="trend-card-urval">${urVal}</span></div>
-      <div class="charts-card-sub">${cur(r.isUS)}${r.s.price.toLocaleString()}</div>
       <div id="chp-${r.s.code}" class="charts-chart-wrap k-loading">載入中...</div>
     </div>`;
   }).join('');
