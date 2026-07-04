@@ -1584,13 +1584,25 @@ async function fetchAllSparklines(){
 async function ensureStockOHLC(code,mkt,period){
   if(!stockOHLCCache[code])stockOHLCCache[code]={};
   const key=period==='weekly'?'w':'d';
-  if(stockOHLCCache[code][key])return stockOHLCCache[code][key];
-  const sym=mkt==='TW'?code+'.TW':code;
+  if(stockOHLCCache[code][key]&&stockOHLCCache[code][key].length>3)return stockOHLCCache[code][key];
   const interval=period==='weekly'?'1wk':'1d';
   const range=period==='weekly'?'1y':'6mo';
-  const data=await fetchYahooOHLC(sym,interval,range).catch(()=>[]);
+  const data=await fetchOHLCsmart(code,mkt,interval,range)||[];
   stockOHLCCache[code][key]=data;
   return data;
+}
+
+// TW 股先試 .TW（上市），失敗再試 .TWO（上櫃）
+async function fetchOHLCsmart(code,mkt,interval,range){
+  if(mkt!=='TW')return fetchYahooOHLC(code,interval,range).catch(()=>null);
+  let d=await fetchYahooOHLC(code+'.TW',interval,range).catch(()=>null);
+  if(!d||d.length<=3)d=await fetchYahooOHLC(code+'.TWO',interval,range).catch(()=>null);
+  return d;
+}
+
+function avgCostOf(code,isUS){
+  const s=(isUS?usStockData:stockData).find(x=>x.code===code);
+  return s&&s.avg>0?s.avg:null;
 }
 
 async function drawChartCard(code,mkt,containerId,period,isUS){
@@ -1599,7 +1611,7 @@ async function drawChartCard(code,mkt,containerId,period,isUS){
   try{
     const ohlc=await ensureStockOHLC(code,mkt,period);
     const fallback=stockIndivHistory[code]||[];
-    renderKPanel(containerId,ohlc.length>3?ohlc:null,fallback,period,isUS);
+    renderKPanel(containerId,ohlc.length>3?ohlc:null,fallback,period,isUS,avgCostOf(code,isUS));
   }catch(e){
     if(wrap){wrap.className='k-error';wrap.innerHTML='<span>無法載入</span>';}
   }
@@ -1691,14 +1703,14 @@ function toggleStockExpand(code,mkt){
     `</div></div></td>`;
   triggerRow.after(expandRow);
 
-  const yfSym=isUS?code:code+'.TW';
   Promise.all([
-    fetchYahooOHLC(yfSym,'1d','6mo').catch(()=>null),
-    fetchYahooOHLC(yfSym,'1wk','1y').catch(()=>null),
+    fetchOHLCsmart(code,mkt,'1d','6mo'),
+    fetchOHLCsmart(code,mkt,'1wk','1y'),
   ]).then(([daily,weekly])=>{
     const hist=stockIndivHistory[code]||[];
-    renderKPanel('kd-'+code,daily,hist,'daily',isUS);
-    renderKPanel('kw-'+code,weekly,hist,'weekly',isUS);
+    const avg=avgCostOf(code,isUS);
+    renderKPanel('kd-'+code,daily,hist,'daily',isUS,avg);
+    renderKPanel('kw-'+code,weekly,hist,'weekly',isUS,avg);
   });
 }
 
@@ -1708,7 +1720,7 @@ async function fetchYahooOHLC(sym,interval,range){
   return res.data;
 }
 
-function renderKPanel(containerId,ohlc,fallbackPts,period,isUS){
+function renderKPanel(containerId,ohlc,fallbackPts,period,isUS,avg){
   const wrap=document.getElementById(containerId);
   if(!wrap)return;
   // Determine canvas height from parent or fallback
@@ -1717,7 +1729,7 @@ function renderKPanel(containerId,ohlc,fallbackPts,period,isUS){
   if(ohlc&&ohlc.length>3){
     wrap.className='';
     wrap.innerHTML=`<canvas style="${cvStyle}"></canvas>`;
-    drawCandlestick(wrap.querySelector('canvas'),ohlc,isUS,period);
+    drawCandlestick(wrap.querySelector('canvas'),ohlc,isUS,period,avg);
   } else if(fallbackPts&&fallbackPts.length>3){
     wrap.className='';
     wrap.innerHTML=`<canvas style="${cvStyle}"></canvas>`;
@@ -1732,7 +1744,7 @@ function renderKPanel(containerId,ohlc,fallbackPts,period,isUS){
       pts=Object.entries(wkMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,price])=>({d,price}));
     }
     const cutDate=new Date(Date.now()-(period==='weekly'?365:180)*86400000).toISOString().slice(0,10);
-    drawLineK(canvas,pts.filter(p=>p.d>=cutDate),isUS,period);
+    drawLineK(canvas,pts.filter(p=>p.d>=cutDate),isUS,period,avg);
   } else {
     wrap.className='k-error';
     wrap.innerHTML='<span>無法載入行情</span><span>請確認網路連線</span>';
@@ -1748,7 +1760,7 @@ function fmtAxis(v){
   return v.toFixed(2);
 }
 
-function drawCandlestick(canvas,data,isUS,period='daily'){
+function drawCandlestick(canvas,data,isUS,period='daily',avg){
   const dpr=window.devicePixelRatio||1;
   const W=canvas.offsetWidth||canvas.parentElement?.offsetWidth||300;
   const H=160;
@@ -1758,7 +1770,9 @@ function drawCandlestick(canvas,data,isUS,period='daily'){
   const upC=isUS?'#34C759':'#FF3B30', dnC=isUS?'#FF3B30':'#34C759';
   const ml=4,mr=44,mt=8,mb=22,cW=W-ml-mr,cH=H-mt-mb;
   const highs=data.map(d=>d.h),lows=data.map(d=>d.l);
-  const maxP=Math.max(...highs),minP=Math.min(...lows),pRng=maxP-minP||1;
+  let maxP=Math.max(...highs),minP=Math.min(...lows);
+  if(avg>0){maxP=Math.max(maxP,avg);minP=Math.min(minP,avg);} // 讓均價線一定落在圖內
+  const pRng=maxP-minP||1;
   const toX=i=>ml+(i+0.5)/data.length*cW;
   const toY=p=>mt+(1-(p-minP)/pRng)*cH;
   const cw=Math.max(1,cW/data.length*0.65);
@@ -1791,9 +1805,22 @@ function drawCandlestick(canvas,data,isUS,period='daily'){
     const lbl=mo+'月';
     if(lbl!==prevMo){prevMo=lbl;ctx.fillText(lbl,toX(i),H-6);}
   });
+  drawAvgLine(ctx,avg,toY,ml,ml+cW);
 }
 
-function drawLineK(canvas,pts,isUS,period){
+// 均價橫虛線（橘色）
+function drawAvgLine(ctx,avg,toY,x0,x1){
+  if(!avg||avg<=0)return;
+  const y=toY(avg);
+  ctx.save();
+  ctx.strokeStyle='#FF9500';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+  ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x1,y);ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle='#FF9500';ctx.textAlign='left';ctx.textBaseline='bottom';ctx.font='9px -apple-system,sans-serif';
+  ctx.fillText('均 '+fmtAxis(avg),x0+2,y-1);
+}
+
+function drawLineK(canvas,pts,isUS,period,avg){
   if(!pts||!pts.length)return;
   const dpr=window.devicePixelRatio||1;
   const W=canvas.offsetWidth||canvas.parentElement?.offsetWidth||300;
@@ -1803,7 +1830,9 @@ function drawLineK(canvas,pts,isUS,period){
   ctx.scale(dpr,dpr);
   const ml=4,mr=44,mt=8,mb=22,cW=W-ml-mr,cH=H-mt-mb;
   const prices=pts.map(p=>p.price);
-  const mn=Math.min(...prices),mx=Math.max(...prices),pRng=mx-mn||1;
+  let mn=Math.min(...prices),mx=Math.max(...prices);
+  if(avg>0){mn=Math.min(mn,avg);mx=Math.max(mx,avg);}
+  const pRng=mx-mn||1;
   const toX=i=>ml+(i/(pts.length-1||1))*cW;
   const toY=p=>mt+(1-(p-mn)/pRng)*cH;
   const trend=prices[prices.length-1]-prices[0];
@@ -1830,6 +1859,7 @@ function drawLineK(canvas,pts,isUS,period){
     const lbl=mo+'月';
     if(lbl!==prevMoL){prevMoL=lbl;ctx.fillText(lbl,toX(i),H-6);}
   });
+  drawAvgLine(ctx,avg,toY,ml,ml+cW);
 }
 
 function renderHoldingsTable(){
