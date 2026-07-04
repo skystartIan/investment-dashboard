@@ -1687,3 +1687,84 @@ function fetchYahooChart_(symbol, interval, range) {
     return { ok: false, error: e.toString() };
   }
 }
+
+// ════════════════════════════════════════════════════════════════
+// kcache：每日盤後預抓所有持股日K(6mo)/周K(1y)，存入 kcache 工作表
+// 設定：專案 → 觸發條件 → 新增，選 buildKCache（不帶底線），時間驅動，每日 14:00~15:00
+// 前端以 action:'read_kcache' 一次讀回全部（取代逐檔即時抓 Yahoo）
+// ════════════════════════════════════════════════════════════════
+// 公開包裝函式：可在執行選單/觸發器中選取（結尾底線的函式不會出現在選單）
+function buildKCache() {
+  buildKCache_();
+}
+
+function buildKCache_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var syms = getAllHoldingSymbols_();
+  var sheet = ss.getSheetByName('kcache');
+  if (!sheet) sheet = ss.insertSheet('kcache');
+  var rows = [['code', 'market', 'data', 'updated']];
+  var now = new Date();
+  syms.forEach(function(it) {
+    var daily  = fetchOHLCsmart_(it.code, it.market, '1d',  '6mo');
+    var weekly = fetchOHLCsmart_(it.code, it.market, '1wk', '1y');
+    var obj = {
+      d: (daily  && daily.ok)  ? daily.data  : [],
+      w: (weekly && weekly.ok) ? weekly.data : []
+    };
+    rows.push([it.code, it.market, JSON.stringify(obj), now]);
+    Utilities.sleep(300); // 避免 Yahoo 並行限流
+  });
+  sheet.clearContents();
+  sheet.getRange(1, 1, rows.length, 4).setValues(rows);
+  Logger.log('buildKCache_ 完成：' + (rows.length - 1) + ' 檔');
+}
+
+// 台股先 .TW（上市）失敗再 .TWO（上櫃）；美股直接用代號
+function fetchOHLCsmart_(code, market, interval, range) {
+  if (market !== 'TW') return fetchYahooChart_(code, interval, range);
+  var d = fetchYahooChart_(code + '.TW', interval, range);
+  if (d && d.ok && d.data && d.data.length > 3) return d;
+  var d2 = fetchYahooChart_(code + '.TWO', interval, range);
+  if (d2 && d2.ok && d2.data && d2.data.length > 3) return d2;
+  return d;
+}
+
+// 讀 holdings_tw / holdings_us 取得所有代號 + 市場
+function getAllHoldingSymbols_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var out = [];
+  [['holdings_tw', 'TW'], ['holdings_us', 'US']].forEach(function(pair) {
+    var sh = ss.getSheetByName(pair[0]);
+    if (!sh) return;
+    var data = sh.getDataRange().getValues();
+    if (data.length < 2) return;
+    var hdr = data[0].map(function(h) { return String(h).trim().toLowerCase(); });
+    var tiI = hdr.findIndex(function(h) { return /^(ticker|code|symbol)/.test(h); });
+    var shI = hdr.findIndex(function(h) { return /^(shares|qty)/.test(h); });
+    if (tiI < 0) tiI = 0;
+    for (var i = 1; i < data.length; i++) {
+      var code = String(data[i][tiI] || '').trim();
+      var sh2  = shI >= 0 ? (Number(data[i][shI]) || 0) : 1;
+      if (code && sh2 > 0) out.push({ code: code, market: pair[1] });
+    }
+  });
+  return out;
+}
+
+// 前端讀取：回傳 { ok, data:{ code:{d:[...],w:[...]} }, updated }
+function readKCache_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('kcache');
+  if (!sh) return { ok: false, error: 'kcache 尚未建立，請先執行 buildKCache_' };
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return { ok: false, error: 'kcache 無資料' };
+  var map = {}, updated = '';
+  for (var i = 1; i < data.length; i++) {
+    var code = String(data[i][0] || '').trim();
+    if (!code) continue;
+    try { map[code] = JSON.parse(data[i][2]); } catch(e) {}
+    if (data[i][3]) updated = data[i][3];
+  }
+  return { ok: true, data: map, updated: updated };
+}

@@ -2,19 +2,18 @@
 // ════════════════════════════════════════════════════════════════
 // Web App 入口（前端 gas() 呼叫此處）
 // 部署方式：部署 → 管理部署 → 新版本 → 任何人可存取
+// GET 版本：避免 POST redirect CORS 問題
 // ════════════════════════════════════════════════════════════════
-function doPost(e) {
+function doGet(e) {
   try {
-    var payload = JSON.parse(e.postData.contents);
-    var action  = payload.action;
-    var ss      = SpreadsheetApp.getActiveSpreadsheet();
+    var p      = e.parameter;
+    var action = p.action;
+    var ss     = SpreadsheetApp.getActiveSpreadsheet();
 
-    // ── 讀取試算表 ──────────────────────────────────────────
     if (action === 'read') {
-      var sheet = ss.getSheetByName(payload.sheet);
-      if (!sheet) return _json({ok: false, error: '找不到工作表: ' + payload.sheet});
+      var sheet = ss.getSheetByName(p.sheet);
+      if (!sheet) return _json({ok: false, error: '找不到工作表: ' + p.sheet});
       var values = sheet.getDataRange().getValues();
-      // 把 Date 物件轉成字串，避免 JSON 序列化問題
       values = values.map(function(row) {
         return row.map(function(cell) {
           if (Object.prototype.toString.call(cell) === '[object Date]') {
@@ -26,12 +25,65 @@ function doPost(e) {
       return _json({ok: true, data: values});
     }
 
-    // ── 匯率 ─────────────────────────────────────────────────
     if (action === 'get_fx_rate') {
       return _json(getFxRate());
     }
 
-    // ── Yahoo Finance K線 / 即時走勢 ──────────────────────────
+    if (action === 'yahoo_chart') {
+      return _json(fetchYahooChart_(
+        p.symbol,
+        p.interval || '1d',
+        p.range    || '6mo'
+      ));
+    }
+
+    if (action === 'fugle_intraday') {
+      return _json(fetchFugleIntraday_(p.symbol));
+    }
+
+    // 讀取每日預抓的日K/周K快取
+    if (action === 'read_kcache') {
+      return _json(readKCache_());
+    }
+
+    // 手動重建快取（測試用）
+    if (action === 'build_kcache') {
+      buildKCache_();
+      return _json({ok: true, msg: 'kcache 已重建'});
+    }
+
+    return _json({ok: false, error: 'unknown action: ' + action});
+
+  } catch(err) {
+    return _json({ok: false, error: err.toString()});
+  }
+}
+
+function doPost(e) {
+  try {
+    var payload = JSON.parse(e.postData.contents);
+    var action  = payload.action;
+    var ss      = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (action === 'read') {
+      var sheet = ss.getSheetByName(payload.sheet);
+      if (!sheet) return _json({ok: false, error: '找不到工作表: ' + payload.sheet});
+      var values = sheet.getDataRange().getValues();
+      values = values.map(function(row) {
+        return row.map(function(cell) {
+          if (Object.prototype.toString.call(cell) === '[object Date]') {
+            return Utilities.formatDate(cell, 'Asia/Taipei', 'yyyy-MM-dd');
+          }
+          return cell;
+        });
+      });
+      return _json({ok: true, data: values});
+    }
+
+    if (action === 'get_fx_rate') {
+      return _json(getFxRate());
+    }
+
     if (action === 'yahoo_chart') {
       return _json(fetchYahooChart_(
         payload.symbol,
@@ -40,9 +92,17 @@ function doPost(e) {
       ));
     }
 
-    // ── Fugle 台股即時盤中 K 線 ────────────────────────────────
     if (action === 'fugle_intraday') {
       return _json(fetchFugleIntraday_(payload.symbol));
+    }
+
+    if (action === 'read_kcache') {
+      return _json(readKCache_());
+    }
+
+    if (action === 'build_kcache') {
+      buildKCache_();
+      return _json({ok: true, msg: 'kcache 已重建'});
     }
 
     return _json({ok: false, error: 'unknown action: ' + action});
