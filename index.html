@@ -1824,7 +1824,7 @@ function drawCandlestick(canvas,data,isUS,period='daily',avg,last){
   const ctx=canvas.getContext('2d');
   ctx.scale(dpr,dpr);
   const upC=isUS?'#34C759':'#FF3B30', dnC=isUS?'#FF3B30':'#34C759';
-  const ml=4,mr=44,mt=8,mb=22,cW=W-ml-mr,cH=H-mt-mb;
+  const ml=4,mr=44,mt=13,mb=22,cW=W-ml-mr,cH=H-mt-mb;
   const highs=data.map(d=>d.h),lows=data.map(d=>d.l);
   let maxP=Math.max(...highs),minP=Math.min(...lows);
   if(avg>0){maxP=Math.max(maxP,avg);minP=Math.min(minP,avg);} // 讓均價線一定落在圖內
@@ -1851,16 +1851,19 @@ function drawCandlestick(canvas,data,isUS,period='daily',avg,last){
     const bt=Math.min(toY(d.o),toY(d.c)),bh=Math.max(1,Math.abs(toY(d.o)-toY(d.c)));
     if(isUp){ctx.strokeRect(x-cw/2,bt,cw,bh);}else{ctx.fillRect(x-cw/2,bt,cw,bh);}
   });
-  // X 軸日期標籤 — 每月一格（週K圖為每季）
+  // X 軸日期標籤 — 每月一格（週K圖為每季）；太窄就跳過避免重疊
   ctx.fillStyle='#8E8E93';ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.font='10px -apple-system,sans-serif';
   const isWeeklyChart=period==='weekly';
   const Q=[1,4,7,10]; // quarters
-  let prevMo='';
+  let prevMo='',lastLX=-99;
   data.forEach((d,i)=>{
     const mo=parseInt(d.d.slice(5,7));
     if(isWeeklyChart&&!Q.includes(mo))return;
     const lbl=mo+'月';
-    if(lbl!==prevMo){prevMo=lbl;ctx.fillText(lbl,toX(i),H-6);}
+    if(lbl!==prevMo){
+      prevMo=lbl;const lx=toX(i);
+      if(lx-lastLX>=20){lastLX=lx;ctx.fillText(lbl,lx,H-6);}
+    }
   });
   drawHLine(ctx,avg,toY,ml,ml+cW,'#FF9500','均 '+fmtAxis(avg),false);
   drawHLine(ctx,last,toY,ml,ml+cW,'#007AFF','收 '+fmtAxis(last),true);
@@ -1874,9 +1877,12 @@ function drawHLine(ctx,val,toY,x0,x1,color,label,alignRight){
   ctx.strokeStyle=color;ctx.lineWidth=1;ctx.setLineDash([4,3]);
   ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(x1,y);ctx.stroke();
   ctx.restore();
-  ctx.fillStyle=color;ctx.textBaseline='bottom';ctx.font='9px -apple-system,sans-serif';
-  if(alignRight){ctx.textAlign='right';ctx.fillText(label,x1-2,y-1);}
-  else{ctx.textAlign='left';ctx.fillText(label,x0+2,y-1);}
+  ctx.fillStyle=color;ctx.font='9px -apple-system,sans-serif';
+  const near=y<11; // 靠近頂端就把文字放線下方，避免被裁掉
+  ctx.textBaseline=near?'top':'bottom';
+  const ly=near?y+2:y-1;
+  if(alignRight){ctx.textAlign='right';ctx.fillText(label,x1-2,ly);}
+  else{ctx.textAlign='left';ctx.fillText(label,x0+2,ly);}
 }
 
 function drawLineK(canvas,pts,isUS,period,avg,last){
@@ -1887,7 +1893,7 @@ function drawLineK(canvas,pts,isUS,period,avg,last){
   canvas.width=W*dpr;canvas.height=H*dpr;
   const ctx=canvas.getContext('2d');
   ctx.scale(dpr,dpr);
-  const ml=4,mr=44,mt=8,mb=22,cW=W-ml-mr,cH=H-mt-mb;
+  const ml=4,mr=44,mt=13,mb=22,cW=W-ml-mr,cH=H-mt-mb;
   const prices=pts.map(p=>p.price);
   let mn=Math.min(...prices),mx=Math.max(...prices);
   if(avg>0){mn=Math.min(mn,avg);mx=Math.max(mx,avg);}
@@ -1912,12 +1918,15 @@ function drawLineK(canvas,pts,isUS,period,avg,last){
   ctx.fillStyle='#8E8E93';ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.font='10px -apple-system,sans-serif';
   const isWeeklyLine=period==='weekly';
   const Qw=[1,4,7,10];
-  let prevMoL='';
+  let prevMoL='',lastLXl=-99;
   pts.forEach(({d},i)=>{
     const mo=parseInt(d.slice(5,7));
     if(isWeeklyLine&&!Qw.includes(mo))return;
     const lbl=mo+'月';
-    if(lbl!==prevMoL){prevMoL=lbl;ctx.fillText(lbl,toX(i),H-6);}
+    if(lbl!==prevMoL){
+      prevMoL=lbl;const lx=toX(i);
+      if(lx-lastLXl>=20){lastLXl=lx;ctx.fillText(lbl,lx,H-6);}
+    }
   });
   drawHLine(ctx,avg,toY,ml,ml+cW,'#FF9500','均 '+fmtAxis(avg),false);
   drawHLine(ctx,last,toY,ml,ml+cW,'#007AFF','收 '+fmtAxis(last),true);
