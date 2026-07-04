@@ -589,6 +589,11 @@ body{
   box-shadow:none!important;
 }
 .k-expand-inner{padding:10px 10px 14px}
+.k-expand-summary{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:2px 2px 10px}
+.kes-label{font-size:.75rem;color:#8E8E93}
+.kes-pl{font-size:1rem;font-weight:700}
+.kes-val{font-size:.85rem;font-weight:500;opacity:.85}
+.kes-meta{font-size:.72rem;color:#8E8E93;margin-left:auto}
 .k-charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media(max-width:560px){.k-charts-grid{grid-template-columns:1fr}}
 .k-chart-block{
@@ -634,7 +639,10 @@ body{
 .cpt-btn{border:none;background:transparent;border-radius:6px;padding:6px 16px;font-size:.82rem;font-weight:700;color:#636366;cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent}
 .cpt-btn.on{background:#fff;color:#1C1C1E;box-shadow:0 1px 4px rgba(0,0,0,.12)}
 .charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-@media(max-width:560px){.charts-grid{grid-template-columns:1fr}}
+@media(max-width:560px){.charts-grid{grid-template-columns:1fr 1fr;gap:6px}
+  .charts-card{padding:7px 6px 6px}
+  .charts-chart-wrap{height:120px}
+  .charts-card-name{display:none}}
 .charts-card{background:#fff;border-radius:12px;padding:10px 10px 8px;box-shadow:0 1px 5px rgba(0,0,0,.08);overflow:hidden}
 .charts-card-hdr{display:flex;align-items:baseline;gap:6px;margin-bottom:2px}
 .charts-card-ticker{font-size:.95rem;font-weight:800;color:#007AFF;font-family:'Courier New',monospace;white-space:nowrap}
@@ -1725,10 +1733,24 @@ function toggleStockExpand(code,mkt){
 
   const colCount=triggerRow.children.length;
   const isUS=mkt==='US';
+  // 未實現損益摘要列
+  const stk=(isUS?usStockData:stockData).find(s=>s.code===code);
+  let summaryHTML='';
+  if(stk){
+    const {unrealized,unrealPct}=calcUnreal(stk,isUS);
+    const cCur=isUS?'$':'';
+    const urCls=isUS?clsPN(unrealPct):clsPNmkt(unrealPct,'TW');
+    const urVal=(unrealized>=0?'+':'−')+cCur+Math.abs(Math.round(unrealized)).toLocaleString();
+    summaryHTML=`<div class="k-expand-summary">`+
+      `<span class="kes-label">未實現損益</span>`+
+      `<span class="kes-pl ${urCls}">${fmtPct(unrealPct)} <span class="kes-val">${urVal}</span></span>`+
+      `<span class="kes-meta">均價 ${cCur}${fmtAxis(stk.avg)} · 現價 ${cCur}${fmtAxis(stk.price)}</span>`+
+      `</div>`;
+  }
   const expandRow=document.createElement('tr');
   expandRow.id='k-xrow-'+code;
   expandRow.className='k-expand-row';
-  expandRow.innerHTML=`<td colspan="${colCount}"><div class="k-expand-inner"><div class="k-charts-grid">`+
+  expandRow.innerHTML=`<td colspan="${colCount}"><div class="k-expand-inner">${summaryHTML}<div class="k-charts-grid">`+
     `<div class="k-chart-block"><div class="k-chart-label">日K <span class="k-chart-range">近6個月</span></div><div id="kd-${code}" class="k-loading">載入中...</div></div>`+
     `<div class="k-chart-block"><div class="k-chart-label">周K <span class="k-chart-range">近1年</span></div><div id="kw-${code}" class="k-loading">載入中...</div></div>`+
     `</div></div></td>`;
