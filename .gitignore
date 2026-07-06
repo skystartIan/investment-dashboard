@@ -1,3 +1,17 @@
 node_modules/
 package.json
 package-lock.json
+
+# 秘密 / 憑證 — 絕對不可進版控（此 repo 有 GitHub remote）
+.env
+*.env
+*.pfx
+gen-lang-client-*.json
+
+# Python 快取
+__pycache__/
+*.pyc
+
+# 本機 log
+logs/
+*.log
