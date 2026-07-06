@@ -1525,15 +1525,29 @@ function sortHoldings(col){
 /* ════════════════════════════════════════════
    SPARKLINE & K-CHART
 ════════════════════════════════════════════ */
-function buildSparkSVG(prices,prevClose,isUS,isIntraday){
+// data 在 isIntraday=true 時是完整 candle 物件陣列（含 t，用來對齊真實時間到收盤）；
+// isIntraday=false 時是單純價格陣列（5日日線 fallback，沒有分鐘時間軸概念）
+function buildSparkSVG(data,prevClose,isUS,isIntraday){
   const H=26,pad=2,lblW=24,W=72+lblW; // 右側留空間標上下限
   const plotW=W-pad*2-lblW;
+  const prices=isIntraday?data.map(c=>c.c):data;
   const allP=prevClose>0?[...prices,prevClose]:prices;
   const mn=Math.min(...allP),mx=Math.max(...allP),rng=mx-mn||1;
-  const x=i=>pad+(i/(prices.length-1||1))*plotW;
+  let xFrac;
+  if(isIntraday){
+    const {start,end,tz}=_sessionRange(isUS);
+    const span=end-start;
+    const mins=data.map(c=>_candleMinuteOfDay(c.t,tz));
+    const validTimes=mins.every(v=>v!=null);
+    xFrac=i=>validTimes?Math.min(1,Math.max(0,(mins[i]-start)/span)):(i/(prices.length-1||1));
+  }else{
+    xFrac=i=>i/(prices.length-1||1);
+  }
+  const x=i=>pad+xFrac(i)*plotW;
   const y=p=>H-pad-((p-mn)/rng)*(H-pad*2);
   const d=prices.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
-  const trend=prices[prices.length-1]-prices[0];
+  // 漲跌色以「昨收」為基準，跟同一列的變化%顏色一致；沒有昨收才退回比對區間內第一筆
+  const trend=prevClose>0?(prices[prices.length-1]-prevClose):(prices[prices.length-1]-prices[0]);
   const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
   const prevLine=prevClose>0
     ?`<line x1="${pad}" y1="${y(prevClose).toFixed(1)}" x2="${(pad+plotW).toFixed(1)}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="0.8" stroke-dasharray="2,2"/>`
@@ -1551,8 +1565,8 @@ function buildSparkSVG(prices,prevClose,isUS,isIntraday){
 
 function sparklineSVG(code,isUS){
   const prev=isUS?prevPricesUS[code]:prevPrices[code];
-  const intra=stockIntradayPrices[code];
-  if(intra&&intra.length>=3)return buildSparkSVG(intra,prev,isUS,true);
+  const candles=stockIntradayCandles[code];
+  if(candles&&candles.length>=3)return buildSparkSVG(candles,prev,isUS,true);
   const hist=stockIndivHistory[code];
   if(!hist||hist.length<3)return '';
   // Fallback: last 4 closes + 今天最新價（含今日大漲）
@@ -1821,7 +1835,8 @@ function buildBigSparkSVG(candles,prevClose,isUS){
   const y=p=>padT+plotH-((p-mn)/rng)*plotH;
 
   const d=closes.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
-  const trend=closes[closes.length-1]-closes[0];
+  // 漲跌色以「昨收」為基準，跟小圖、變化%欄位一致
+  const trend=prevClose>0?(closes[closes.length-1]-prevClose):(closes[closes.length-1]-closes[0]);
   const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
 
   // Y 軸格線 + 價格標籤（右側，跟 K 線圖同一側）
