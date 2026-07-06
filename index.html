@@ -899,6 +899,7 @@ let holdingsTabMode='today';
 let stockIndivHistory={};   // code → [{d,price}]
 let stockIntradayPrices={};  // code → [close, close, ...]  (5-min intraday)
 let stockIntradayRange={};   // code → {h, l}  (today's intraday high/low)
+let stockIntradayCandles={}; // code → [{t,o,h,l,c}, ...]  (raw candles, for time-based axis)
 let stockOHLCCache={};       // code → {d:[ohlc], w:[ohlc]}
 let expandedStock=null;
 let _intradayFetchDone=false;
@@ -1592,6 +1593,7 @@ function updateSparklineDOM(code,isUS){
 }
 
 function _applyIntradayCandles(code,candles){
+  stockIntradayCandles[code]=candles;
   stockIntradayPrices[code]=candles.map(d=>d.c);
   const hs=candles.map(d=>d.h).filter(v=>v!=null),ls=candles.map(d=>d.l).filter(v=>v!=null);
   if(hs.length&&ls.length)stockIntradayRange[code]={h:Math.max(...hs),l:Math.min(...ls)};
@@ -1735,43 +1737,85 @@ async function drawIntradayCard(code,mkt,containerId,isUS){
   const wrap=document.getElementById(containerId);
   if(!wrap)return;
   try{
-    if(!stockIntradayPrices[code]||stockIntradayPrices[code].length<3){
+    if(!stockIntradayCandles[code]||stockIntradayCandles[code].length<3){
       const candles=mkt==='TW'?await fetchTWIntraday(code):await fetchYahooIntraday(code);
       if(candles.length<3)throw new Error('no data');
       _applyIntradayCandles(code,candles);
     }
-    const prices=stockIntradayPrices[code];
+    const candles=stockIntradayCandles[code];
     const prev=isUS?prevPricesUS[code]:prevPrices[code];
     wrap.className='trend-chart-wrap';
-    wrap.innerHTML=buildBigSparkSVG(prices,prev,isUS);
+    wrap.innerHTML=buildBigSparkSVG(candles,prev,isUS);
   }catch(e){
     wrap.className='k-error';
     wrap.innerHTML='<span>無法載入</span>';
   }
 }
 
-function buildBigSparkSVG(prices,prevClose,isUS){
-  const W=300,H=100,pad=8;
-  const allP=prevClose>0?[...prices,prevClose]:prices;
+// 交易時段（本地時區）：台股 09:00–13:30，美股 09:30–16:00（美東）
+function _sessionRange(isUS){
+  return isUS?{start:9*60+30,end:16*60,tz:'America/New_York'}:{start:9*60,end:13*60+30,tz:'Asia/Taipei'};
+}
+// candle 的 t 可能是 unix 秒數（Yahoo）或 ISO 字串（富果），統一換算成該時區的「當日第幾分鐘」
+function _candleMinuteOfDay(t,tz){
+  if(t==null)return null;
+  const dt=typeof t==='number'?new Date(t*1000):new Date(t);
+  if(isNaN(dt.getTime()))return null;
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:tz,hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(dt);
+  const h=parseInt(parts.find(p=>p.type==='hour').value,10);
+  const m=parseInt(parts.find(p=>p.type==='minute').value,10);
+  return h*60+m;
+}
+function _fmtHHMM(min){
+  return String(Math.floor(min/60)).padStart(2,'0')+':'+String(Math.round(min%60)).padStart(2,'0');
+}
+
+// X 軸固定為整個交易時段（開盤→收盤），資料只畫到目前時間，右側留白到收盤
+// Y 軸為股價，含格線與昨收虛線
+function buildBigSparkSVG(candles,prevClose,isUS){
+  const W=300,H=110,padL=32,padR=8,padT=14,padB=18;
+  const plotW=W-padL-padR,plotH=H-padT-padB;
+  const {start,end,tz}=_sessionRange(isUS);
+  const span=end-start;
+
+  const mins=candles.map(c=>_candleMinuteOfDay(c.t,tz));
+  const validTimes=mins.every(v=>v!=null);
+  const xFrac=i=>validTimes?Math.min(1,Math.max(0,(mins[i]-start)/span)):(i/(candles.length-1||1));
+
+  const closes=candles.map(c=>c.c);
+  const allP=prevClose>0?[...closes,prevClose]:closes;
   const mn=Math.min(...allP),mx=Math.max(...allP),rng=mx-mn||1;
-  const x=i=>pad+(i/(prices.length-1||1))*(W-pad*2);
-  const y=p=>H-pad-((p-mn)/rng)*(H-pad*2);
-  const d=prices.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
-  const trend=prices[prices.length-1]-prices[0];
+  const x=i=>padL+xFrac(i)*plotW;
+  const y=p=>padT+plotH-((p-mn)/rng)*plotH;
+
+  const d=closes.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
+  const trend=closes[closes.length-1]-closes[0];
   const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
+
   const prevLine=prevClose>0
-    ?`<line x1="${pad}" y1="${y(prevClose).toFixed(1)}" x2="${W-pad}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="1" stroke-dasharray="4,3"/>`
+    ?`<line x1="${padL}" y1="${y(prevClose).toFixed(1)}" x2="${padL+plotW}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="1" stroke-dasharray="4,3"/>`
     :'';
   const prevLbl=prevClose>0
-    ?`<text x="${pad}" y="${(y(prevClose)-4).toFixed(1)}" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">昨收 ${fmtAxis(prevClose)}</text>`
+    ?`<text x="${padL+2}" y="${(y(prevClose)-4).toFixed(1)}" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">昨收 ${fmtAxis(prevClose)}</text>`
     :'';
-  const pMax=Math.max(...prices),pMin=Math.min(...prices);
-  const lastX=x(prices.length-1),lastY=y(prices[prices.length-1]);
+
+  // Y 軸格線 + 價格標籤（高／中／低）
+  const yTicks=[mx,(mx+mn)/2,mn];
+  const yGrid=yTicks.map(v=>
+    `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${padL+plotW}" y2="${y(v).toFixed(1)}" stroke="#F2F2F7" stroke-width="1"/>`+
+    `<text x="${(padL-4).toFixed(1)}" y="${(y(v)+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">${fmtAxis(v)}</text>`
+  ).join('');
+
+  // X 軸：開盤／盤中／收盤時間，固定畫到收盤
+  const xTicks=[start,(start+end)/2,end];
+  const xAxis=xTicks.map(min=>
+    `<text x="${(padL+((min-start)/span)*plotW).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">${_fmtHHMM(min)}</text>`
+  ).join('');
+
+  const lastX=x(closes.length-1),lastY=y(closes[closes.length-1]);
   const dot=`<circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.8" fill="${col}"/>`;
-  const labels=
-    `<text x="${W-pad}" y="12" text-anchor="end" font-size="10" fill="#8E8E93" font-family="-apple-system,sans-serif">高 ${fmtAxis(pMax)}</text>`+
-    `<text x="${W-pad}" y="${H-4}" text-anchor="end" font-size="10" fill="#8E8E93" font-family="-apple-system,sans-serif">低 ${fmtAxis(pMin)}</text>`;
-  return `<svg width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${prevLine}${prevLbl}<path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dot}${labels}</svg>`;
+
+  return `<svg width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${yGrid}${prevLine}${prevLbl}<path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dot}${xAxis}</svg>`;
 }
 
 function renderChartsPage(){

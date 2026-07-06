@@ -1679,7 +1679,7 @@ function fetchYahooChart_(symbol, interval, range) {
     return {
       ok: true,
       data: ts.map(function(t, i) {
-        return { d: new Date(t * 1000).toISOString().slice(0, 10),
+        return { t: t, d: new Date(t * 1000).toISOString().slice(0, 10),
                  o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i] };
       }).filter(function(r) { return r.o != null && r.c != null; })
     };
