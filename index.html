@@ -630,7 +630,7 @@ body{
 .trend-card-chg{font-size:.78rem;font-weight:700;white-space:nowrap}
 .trend-card-urval{font-weight:400;opacity:.75;font-size:.72rem}
 .trend-chart-wrap{width:100%;height:130px}
-.trend-chart-wrap canvas{width:100%;height:100%;display:block}
+.trend-chart-wrap canvas,.trend-chart-wrap svg{width:100%;height:100%;display:block}
 
 /* ── CHARTS PAGE (多股圖) ── */
 .charts-pg-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
@@ -784,7 +784,7 @@ body{
         <table class="hld-tbl">
           <thead><tr id="hld-thead-row"></tr></thead>
           <tbody id="hld-body">
-            <tr><td colspan="4" style="padding:14px 16px">
+            <tr><td colspan="5" style="padding:14px 16px">
               <div class="skel" style="height:40px;margin-bottom:6px"></div>
               <div class="skel" style="height:40px;margin-bottom:6px;opacity:.7"></div>
               <div class="skel" style="height:40px;opacity:.5"></div>
@@ -898,12 +898,14 @@ let holdingsSortCol='mv',holdingsSortDir='desc';
 let holdingsTabMode='today';
 let stockIndivHistory={};   // code → [{d,price}]
 let stockIntradayPrices={};  // code → [close, close, ...]  (5-min intraday)
+let stockIntradayRange={};   // code → {h, l}  (today's intraday high/low)
 let stockOHLCCache={};       // code → {d:[ohlc], w:[ohlc]}
 let expandedStock=null;
 let _intradayFetchDone=false;
 let chartsPeriod='daily';
+let trendPeriod='daily';     // 走勢 tab 專用：daily / weekly / intraday
 const HLD_TABS={
-  today:{cols:[{key:'price',label:'最後價'},{key:'dayPct',label:'變化%'},{key:'dayAmt',label:'盈虧$'}],defaultSort:'dayAmt'},
+  today:{cols:[{key:'price',label:'最後價'},{key:'amplitude',label:'振幅'},{key:'dayPct',label:'變化%'},{key:'dayAmt',label:'盈虧$'}],defaultSort:'dayAmt'},
   pnl:  {cols:[{key:'unrealPct',label:'未實現%'},{key:'unreal',label:'未實現$'},{key:'avg',label:'均價'}],defaultSort:'unrealPct'},
   alloc:{cols:[{key:'costPct',label:'成本佔比'},{key:'mv',label:'市場價值'},{key:'navPct',label:'淨清算%'}],defaultSort:'costPct'},
   trend:{cols:[],defaultSort:'mv'},
@@ -1558,16 +1560,17 @@ function sparklineSVG(code,isUS){
   return buildSparkSVG(pts,prev,isUS,false);
 }
 
+// 回傳完整 K 棒（含高低），供小圖收盤價序列與今日振幅共用
 async function fetchFugleIntraday(symbol){
   const res=await gas({action:'fugle_intraday',symbol});
   if(!res.ok||!res.data?.length)throw new Error('no data');
-  return res.data.map(d=>d.c).filter(p=>p!=null);
+  return res.data.filter(d=>d.c!=null);
 }
 
 async function fetchYahooIntraday(sym){
   const res=await gas({action:'yahoo_chart',symbol:sym,interval:'5m',range:'1d'});
   if(!res.ok||!res.data?.length)throw new Error('no data');
-  return res.data.map(d=>d.c).filter(p=>p!=null);
+  return res.data.filter(d=>d.c!=null);
 }
 
 // 台股盤中小圖：富果即時 → 假日退回 Yahoo「最近交易日」盤中5分K（如週五當天走勢）
@@ -1588,20 +1591,29 @@ function updateSparklineDOM(code,isUS){
   else if(svg)td.insertAdjacentHTML('beforeend',svg);
 }
 
+function _applyIntradayCandles(code,candles){
+  stockIntradayPrices[code]=candles.map(d=>d.c);
+  const hs=candles.map(d=>d.h).filter(v=>v!=null),ls=candles.map(d=>d.l).filter(v=>v!=null);
+  if(hs.length&&ls.length)stockIntradayRange[code]={h:Math.max(...hs),l:Math.min(...ls)};
+}
+
 async function fetchAllSparklines(){
   const mkt=currentPortfolio;
   const stocks=[];
   if(mkt==='TW'||mkt==='ALL')stocks.push(...stockData.filter(s=>s.mkt==='TW').map(s=>({code:s.code,mkt:'TW'})));
   if(mkt==='US'||mkt==='ALL')stocks.push(...usStockData.map(s=>({code:s.code,mkt:'US'})));
+  let gotAny=false;
   for(const {code,mkt:m} of stocks){
     if(stockIntradayPrices[code])continue;
     try{
-      const prices=m==='TW'
+      const candles=m==='TW'
         ? await fetchTWIntraday(code)
         : await fetchYahooIntraday(code);
-      if(prices.length>=3){stockIntradayPrices[code]=prices;updateSparklineDOM(code,m==='US');}
+      if(candles.length>=3){_applyIntradayCandles(code,candles);updateSparklineDOM(code,m==='US');gotAny=true;}
     }catch(e){console.warn('sparkline',code,e.message);}
   }
+  // 振幅欄位要等所有資料到齊才重繪，避免逐檔重繪整張表
+  if(gotAny&&holdingsTabMode==='today')renderHoldingsTable();
 }
 
 /* ════════════════════════════════════════════
@@ -1676,9 +1688,15 @@ async function drawChartCard(code,mkt,containerId,period,isUS){
   }
 }
 
-function renderTrendGrid(rows,container){
+function setTrendPeriod(p){
+  trendPeriod=p;
+  if(holdingsTabMode==='trend')renderHoldingsTable();
+}
+
+function renderTrendGrid(rows,container,period){
   container.className='trend-grid';
   const cur=isUS=>isUS?'$':'';
+  const isIntraday=period==='intraday';
   container.innerHTML=rows.map(r=>{
     const urCls=r.isUS?clsPN(r.unrealPct||0):clsPNmkt(r.unrealPct||0,'TW');
     const urPct=fmtPct(r.unrealPct||0);
@@ -1692,14 +1710,68 @@ function renderTrendGrid(rows,container){
       <div id="trd-${r.s.code}" class="trend-chart-wrap k-loading">載入中...</div>
     </div>`;
   }).join('');
-  drawChartCardsSeq(rows.map(r=>({code:r.s.code,mkt:r.s.mkt,id:'trd-'+r.s.code,isUS:r.isUS})));
+  if(isIntraday){
+    drawIntradayCardsSeq(rows.map(r=>({code:r.s.code,mkt:r.s.mkt,id:'trd-'+r.s.code,isUS:r.isUS})));
+  }else{
+    drawChartCardsSeq(rows.map(r=>({code:r.s.code,mkt:r.s.mkt,id:'trd-'+r.s.code,isUS:r.isUS})),period);
+  }
 }
 
 // 依序載入 K 圖，避免 Yahoo 並行限流導致部分退回折線（圖面不一致）
-async function drawChartCardsSeq(cards){
+async function drawChartCardsSeq(cards,period){
   for(const c of cards){
-    await drawChartCard(c.code,c.mkt,c.id,chartsPeriod,c.isUS);
+    await drawChartCard(c.code,c.mkt,c.id,period||chartsPeriod,c.isUS);
   }
+}
+
+// 走勢 tab「即時」模式：大版 sparkline，沿用與小圖相同的富果/Yahoo 盤中資料
+async function drawIntradayCardsSeq(cards){
+  for(const c of cards){
+    await drawIntradayCard(c.code,c.mkt,c.id,c.isUS);
+  }
+}
+
+async function drawIntradayCard(code,mkt,containerId,isUS){
+  const wrap=document.getElementById(containerId);
+  if(!wrap)return;
+  try{
+    if(!stockIntradayPrices[code]||stockIntradayPrices[code].length<3){
+      const candles=mkt==='TW'?await fetchTWIntraday(code):await fetchYahooIntraday(code);
+      if(candles.length<3)throw new Error('no data');
+      _applyIntradayCandles(code,candles);
+    }
+    const prices=stockIntradayPrices[code];
+    const prev=isUS?prevPricesUS[code]:prevPrices[code];
+    wrap.className='trend-chart-wrap';
+    wrap.innerHTML=buildBigSparkSVG(prices,prev,isUS);
+  }catch(e){
+    wrap.className='k-error';
+    wrap.innerHTML='<span>無法載入</span>';
+  }
+}
+
+function buildBigSparkSVG(prices,prevClose,isUS){
+  const W=300,H=100,pad=8;
+  const allP=prevClose>0?[...prices,prevClose]:prices;
+  const mn=Math.min(...allP),mx=Math.max(...allP),rng=mx-mn||1;
+  const x=i=>pad+(i/(prices.length-1||1))*(W-pad*2);
+  const y=p=>H-pad-((p-mn)/rng)*(H-pad*2);
+  const d=prices.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(p).toFixed(1)).join(' ');
+  const trend=prices[prices.length-1]-prices[0];
+  const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
+  const prevLine=prevClose>0
+    ?`<line x1="${pad}" y1="${y(prevClose).toFixed(1)}" x2="${W-pad}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="1" stroke-dasharray="4,3"/>`
+    :'';
+  const prevLbl=prevClose>0
+    ?`<text x="${pad}" y="${(y(prevClose)-4).toFixed(1)}" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">昨收 ${fmtAxis(prevClose)}</text>`
+    :'';
+  const pMax=Math.max(...prices),pMin=Math.min(...prices);
+  const lastX=x(prices.length-1),lastY=y(prices[prices.length-1]);
+  const dot=`<circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.8" fill="${col}"/>`;
+  const labels=
+    `<text x="${W-pad}" y="12" text-anchor="end" font-size="10" fill="#8E8E93" font-family="-apple-system,sans-serif">高 ${fmtAxis(pMax)}</text>`+
+    `<text x="${W-pad}" y="${H-4}" text-anchor="end" font-size="10" fill="#8E8E93" font-family="-apple-system,sans-serif">低 ${fmtAxis(pMin)}</text>`;
+  return `<svg width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${prevLine}${prevLbl}<path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dot}${labels}</svg>`;
 }
 
 function renderChartsPage(){
@@ -1732,9 +1804,8 @@ function renderChartsPage(){
 
 function setChartsPeriod(p){
   chartsPeriod=p;
-  document.querySelectorAll('.cpt-btn').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  document.querySelectorAll('.charts-pg-hdr .cpt-btn').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   if(document.getElementById('panel-charts').classList.contains('on'))renderChartsPage();
-  if(holdingsTabMode==='trend')renderHoldingsTable();
 }
 
 function toggleStockExpand(code,mkt){
@@ -1971,7 +2042,7 @@ function renderHoldingsTable(){
   }
 
   const tbody=document.getElementById('hld-body');
-  if(!stocks.length){tbody.innerHTML=`<tr><td colspan="4" class="empty">暫無資料</td></tr>`;return;}
+  if(!stocks.length){tbody.innerHTML=`<tr><td colspan="5" class="empty">暫無資料</td></tr>`;return;}
 
   // Total NAV for 淨清算%
   let totalNAV=0;
@@ -1995,7 +2066,9 @@ function renderHoldingsTable(){
     const unrealPct=costBasis>0?unrealized/costBasis*100:0;
     const mvNTD=mv*(isUS?fxRate:1);
     const navPct=totalNAV>0?mvNTD/totalNAV*100:0;
-    return {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,mvNTD};
+    const rng=stockIntradayRange[s.code];
+    const amplitude=(rng&&hasPrev)?(rng.h-rng.l)/prev*100:null;
+    return {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,mvNTD,amplitude};
   });
 
   const totalCost=rows.reduce((s,r)=>s+r.costBasis*(r.isUS?fxRate:1),0);
@@ -2014,13 +2087,28 @@ function renderHoldingsTable(){
     mv:(a,b)=>dir*(a.mvNTD-b.mvNTD),
     navPct:(a,b)=>dir*(a.navPct-b.navPct),
     costPct:(a,b)=>dir*(a.costPct-b.costPct),
+    amplitude:(a,b)=>dir*((a.amplitude??-Infinity)-(b.amplitude??-Infinity)),
   };
   rows.sort(sortMap[holdingsSortCol]||sortMap.mv);
 
-  // ── TREND MODE: replace table with K-chart grid ──
+  // ── TREND MODE: replace table with K-chart / 即時走勢 grid ──
   if(holdingsTabMode==='trend'){
     document.getElementById('hld-thead-row').innerHTML='';
     document.querySelector('.hld-tbl').style.display='none';
+    let toolbar=document.getElementById('hld-trend-toolbar');
+    if(!toolbar){
+      toolbar=document.createElement('div');
+      toolbar.id='hld-trend-toolbar';
+      toolbar.className='cpt-wrap';
+      toolbar.style.margin='0 12px 10px';
+      toolbar.innerHTML=`
+        <button class="cpt-btn" data-p="daily"    onclick="setTrendPeriod('daily')">日K</button>
+        <button class="cpt-btn" data-p="weekly"   onclick="setTrendPeriod('weekly')">周K</button>
+        <button class="cpt-btn" data-p="intraday" onclick="setTrendPeriod('intraday')">即時</button>`;
+      document.querySelector('.hld-wrap').insertBefore(toolbar,document.querySelector('.hld-wrap').firstChild);
+    }
+    toolbar.style.display='';
+    toolbar.querySelectorAll('.cpt-btn').forEach(b=>b.classList.toggle('on',b.dataset.p===trendPeriod));
     let trendGrid=document.getElementById('hld-trend-grid');
     if(!trendGrid){
       trendGrid=document.createElement('div');
@@ -2028,22 +2116,25 @@ function renderHoldingsTable(){
       document.querySelector('.hld-wrap').appendChild(trendGrid);
     }
     trendGrid.style.display='';
-    renderTrendGrid(rows,trendGrid);
-    if(!_intradayFetchDone){_intradayFetchDone=true;fetchAllSparklines();}
+    renderTrendGrid(rows,trendGrid,trendPeriod);
+    if(trendPeriod!=='intraday'&&!_intradayFetchDone){_intradayFetchDone=true;fetchAllSparklines();}
     return;
   }
   // Restore table if switching away from trend
   document.querySelector('.hld-tbl').style.display='';
   const _tg=document.getElementById('hld-trend-grid');
   if(_tg)_tg.style.display='none';
+  const _ttb=document.getElementById('hld-trend-toolbar');
+  if(_ttb)_ttb.style.display='none';
 
   // Cell renderer per column key
   function cell(key,r){
-    const {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,costPct}=r;
+    const {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,costPct,amplitude}=r;
     const cur=isUS?'$':'';const m=isUS?'US':'TW';const pc=v=>clsPNmkt(v,m);
     const sgn=v=>v===null?'--':(v>=0?'+':'-')+cur+Math.abs(Math.round(v)).toLocaleString();
     switch(key){
       case 'price':    return `<td class="r">${s.price.toLocaleString()}</td>`;
+      case 'amplitude':return `<td class="r neu">${amplitude!=null?amplitude.toFixed(2)+'%':'--'}</td>`;
       case 'dayPct':   return `<td class="r ${hasPrev?pc(dayChgPct):'neu'}">${hasPrev?fmtPct(dayChgPct):'--'}</td>`;
       case 'dayAmt':   return `<td class="r ${hasPrev?pc(dayChgAmt):'neu'}">${hasPrev?sgn(dayChgAmt):'--'}</td>`;
       case 'avg':      return `<td class="r">${cur}${s.avg.toFixed(2)}</td>`;
