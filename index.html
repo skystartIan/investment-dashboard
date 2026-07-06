@@ -1600,7 +1600,7 @@ async function fetchAllSparklines(){
         ? await fetchTWIntraday(code)
         : await fetchYahooIntraday(code);
       if(prices.length>=3){stockIntradayPrices[code]=prices;updateSparklineDOM(code,m==='US');}
-    }catch(_){}
+    }catch(e){console.warn('sparkline',code,e.message);}
   }
 }
 

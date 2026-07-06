@@ -1640,8 +1640,8 @@ function fetchFugleIntraday_(symbol) {
   try {
     var apiKey = PropertiesService.getScriptProperties().getProperty('FUGLE_API_KEY');
     if (!apiKey) return { ok: false, error: 'FUGLE_API_KEY 未設定' };
-    var url = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/candles'
-            + '?symbol=' + symbol + '&timeFrame=1';
+    // symbol 是路徑參數，不是 query string：/candles/{symbol}
+    var url = 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/candles/' + encodeURIComponent(symbol);
     var resp = UrlFetchApp.fetch(url, {
       method: 'get',
       headers: { 'X-API-KEY': apiKey },
