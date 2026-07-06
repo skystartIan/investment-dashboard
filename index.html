@@ -969,6 +969,7 @@ window.addEventListener('load',()=>{
   fetchPrevCloseUS().then(m=>{if(Object.keys(m).length){prevPricesUS=m;_sc('prevUS',m);renderHoldingsTable();renderHsSummaryMetrics();}}).catch(_=>{});
   checkFugleStatus();
   loadKCache(); // 預載每日日K/周K快取
+  startIntradayAutoRefresh(); // 盤中每 60 秒自動刷新即時走勢
 });
 
 /* ════════════════════════════════════════════
@@ -1614,8 +1615,31 @@ async function fetchAllSparklines(){
       if(candles.length>=3){_applyIntradayCandles(code,candles);updateSparklineDOM(code,m==='US');gotAny=true;}
     }catch(e){console.warn('sparkline',code,e.message);}
   }
-  // 振幅欄位要等所有資料到齊才重繪，避免逐檔重繪整張表
-  if(gotAny&&holdingsTabMode==='today')renderHoldingsTable();
+  // 振幅欄位、走勢tab的即時卡片都要等所有資料到齊才重繪，避免逐檔重繪整張表
+  if(gotAny&&(holdingsTabMode==='today'||(holdingsTabMode==='trend'&&trendPeriod==='intraday')))renderHoldingsTable();
+}
+
+// 盤中每 60 秒自動刷新一次即時走勢（今日小圖、振幅、走勢tab即時卡片都會一起更新）
+// 分頁切到背景時暫停，避免浪費 API 額度
+let _intradayRefreshing=false;
+async function refreshIntradayData(){
+  if(_intradayRefreshing)return;
+  _intradayRefreshing=true;
+  try{
+    stockIntradayPrices={};stockIntradayCandles={};stockIntradayRange={};
+    _intradayFetchDone=false;
+    await fetchAllSparklines();
+  }finally{
+    _intradayRefreshing=false;
+  }
+}
+function startIntradayAutoRefresh(){
+  setInterval(()=>{
+    if(document.visibilityState!=='visible')return;
+    const day=new Date().getDay();
+    if(day===0||day===6)return; // 週末不刷新
+    refreshIntradayData();
+  },60000);
 }
 
 /* ════════════════════════════════════════════
@@ -1772,8 +1796,16 @@ function _fmtHHMM(min){
 
 // X 軸固定為整個交易時段（開盤→收盤），資料只畫到目前時間，右側留白到收盤
 // Y 軸為股價，含格線與昨收虛線
+// 色塊標籤（背景+白字），永遠畫在圖表右側留白區，不會被走勢線蓋住
+function _svgPill(x,y,label,bg){
+  const w=label.length*5.3+8,h=13;
+  return `<rect x="${x.toFixed(1)}" y="${(y-h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="3" fill="${bg}"/>`+
+    `<text x="${(x+4).toFixed(1)}" y="${(y+3).toFixed(1)}" font-size="9" fill="#fff" font-family="-apple-system,sans-serif">${label}</text>`;
+}
+
+// Y 軸（股價）放右側、X 軸（時間）固定到收盤，與日K/周K圖版面一致
 function buildBigSparkSVG(candles,prevClose,isUS){
-  const W=300,H=110,padL=32,padR=8,padT=14,padB=18;
+  const W=300,H=110,padL=4,padR=44,padT=14,padB=18;
   const plotW=W-padL-padR,plotH=H-padT-padB;
   const {start,end,tz}=_sessionRange(isUS);
   const span=end-start;
@@ -1792,30 +1824,33 @@ function buildBigSparkSVG(candles,prevClose,isUS){
   const trend=closes[closes.length-1]-closes[0];
   const col=isUS?(trend>=0?'#34C759':'#FF3B30'):(trend>=0?'#FF3B30':'#34C759');
 
-  const prevLine=prevClose>0
-    ?`<line x1="${padL}" y1="${y(prevClose).toFixed(1)}" x2="${padL+plotW}" y2="${y(prevClose).toFixed(1)}" stroke="#8E8E93" stroke-width="1" stroke-dasharray="4,3"/>`
-    :'';
-  const prevLbl=prevClose>0
-    ?`<text x="${padL+2}" y="${(y(prevClose)-4).toFixed(1)}" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">昨收 ${fmtAxis(prevClose)}</text>`
-    :'';
-
-  // Y 軸格線 + 價格標籤（高／中／低）
+  // Y 軸格線 + 價格標籤（右側，跟 K 線圖同一側）
   const yTicks=[mx,(mx+mn)/2,mn];
   const yGrid=yTicks.map(v=>
     `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${padL+plotW}" y2="${y(v).toFixed(1)}" stroke="#F2F2F7" stroke-width="1"/>`+
-    `<text x="${(padL-4).toFixed(1)}" y="${(y(v)+3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">${fmtAxis(v)}</text>`
+    `<text x="${(padL+plotW+4).toFixed(1)}" y="${(y(v)+3).toFixed(1)}" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">${fmtAxis(v)}</text>`
   ).join('');
+
+  // 昨收虛線；標籤畫在右側留白區域，絕不會被走勢線壓到
+  let prevLine='',prevPill='';
+  if(prevClose>0){
+    const py=y(prevClose);
+    prevLine=`<line x1="${padL}" y1="${py.toFixed(1)}" x2="${padL+plotW}" y2="${py.toFixed(1)}" stroke="#8E8E93" stroke-width="1" stroke-dasharray="4,3"/>`;
+    prevPill=_svgPill(padL+plotW+4,py,'昨 '+fmtAxis(prevClose),'#8E8E93');
+  }
 
   // X 軸：開盤／盤中／收盤時間，固定畫到收盤
   const xTicks=[start,(start+end)/2,end];
-  const xAxis=xTicks.map(min=>
-    `<text x="${(padL+((min-start)/span)*plotW).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">${_fmtHHMM(min)}</text>`
-  ).join('');
+  const xAxis=xTicks.map((min,i)=>{
+    const anchor=i===0?'start':i===xTicks.length-1?'end':'middle';
+    return `<text x="${(padL+((min-start)/span)*plotW).toFixed(1)}" y="${H-4}" text-anchor="${anchor}" font-size="9" fill="#8E8E93" font-family="-apple-system,sans-serif">${_fmtHHMM(min)}</text>`;
+  }).join('');
 
   const lastX=x(closes.length-1),lastY=y(closes[closes.length-1]);
   const dot=`<circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.8" fill="${col}"/>`;
+  const lastPill=_svgPill(padL+plotW+4,lastY,fmtAxis(closes[closes.length-1]),col);
 
-  return `<svg width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${yGrid}${prevLine}${prevLbl}<path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dot}${xAxis}</svg>`;
+  return `<svg width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${yGrid}${prevLine}<path d="${d}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dot}${prevPill}${lastPill}${xAxis}</svg>`;
 }
 
 function renderChartsPage(){
