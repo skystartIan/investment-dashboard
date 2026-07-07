@@ -777,30 +777,26 @@ def main():
 
     try:
         # ── 0. 判斷是否為交易日 ──
+        # 用 TWSE 即時報價的加權指數成交價 z 判斷：有值代表盤中/已收盤有成交，
+        # z=='-' 代表尚未開盤或非交易日（此 API 為即時盤中資料，無歷史）。
         print('\n[0] 確認今日是否為交易日...')
-        today = datetime.date.today()
         is_trading = False
 
-        #if today.weekday() >= 5:
-        if False:  # today.weekday() >= 5:
-
-            print(f'  今日 {today_str} 為週末，結束。')
-        else:
-            try:
-                import urllib.request, json
-                url = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw'
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read())
-                    z = data['msgArray'][0].get('z', '-')
-                    if z == '-':
-                        print(f'  今日 {today_str} 非交易日（市場未開盤），結束。')
-                    else:
-                        print(f'  ✓ 今日為交易日，大盤最新價：{z}')
-                        is_trading = True
-            except Exception as e:
-                print(f'  [交易日偵測失敗] {e}，預設繼續執行')
-                is_trading = True
+        try:
+            import urllib.request, json
+            url = 'https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw'
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+                z = data['msgArray'][0].get('z', '-')
+                if z == '-':
+                    print(f'  今日 {today_str} 尚未開盤或非交易日（無即時成交價），結束。')
+                else:
+                    print(f'  ✓ 今日為交易日，大盤最新價：{z}')
+                    is_trading = True
+        except Exception as e:
+            print(f'  [交易日偵測失敗] {e}，預設繼續執行')
+            is_trading = True
 
         if not is_trading:
             return
