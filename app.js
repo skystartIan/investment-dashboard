@@ -48,6 +48,7 @@ let stockIndivHistory={};   // code → [{d,price}]
 let stockIntradayPrices={};  // code → [close, close, ...]  (5-min intraday)
 let stockIntradayRange={};   // code → {h, l}  (today's intraday high/low)
 let stockIntradayCandles={}; // code → [{t,o,h,l,c}, ...]  (raw candles, for time-based axis)
+let stockIntradayPrevClose={}; // code → 昨收（Yahoo chart meta，跟盤中K同交易日對齊）
 let stockOHLCCache={};       // code → {d:[ohlc], w:[ohlc]}
 let expandedStock=null;
 let _intradayFetchDone=false;
@@ -217,6 +218,8 @@ async function fetchPrevClose(){
     if(mvI>=0){const v=+String(rows[0][mvI]||'').replace(/[^\d.\-]/g,'');if(v>0)latestTWMV=v;}
     if(urI>=0){const v=+String(rows[0][urI]||'').replace(/[^\d.\-]/g,'');if(!isNaN(v))latestTWUnrealized=v;}
     // Find prev close: first row with a different date
+    // （此 map 只是「沒有盤中K可對日」時的退回值；有盤中K時
+    //   livePrevClose 會依 K 線交易日從 stockIndivHistory 取正確昨收）
     let prevRow=null;
     for(let i=1;i<rows.length;i++){if(String(rows[i][0]).slice(0,10)!==todayDate){prevRow=rows[i];break;}}
     const useRow=prevRow||rows[0];
@@ -575,8 +578,8 @@ function renderHsSummaryMetrics(){
     const twCost=twMv-twUnreal;
     mv+=twMv; cost+=twCost; unrealized+=twUnreal;
     stockData.filter(s=>s.mkt==='TW').forEach(s=>{
-      const prev=prevPrices[s.code];
-      if(prev&&prev>0)dayChg+=(s.price-prev)*s.sh;
+      const prev=livePrevClose(s.code,false);
+      if(prev&&prev>0)dayChg+=(liveLastPrice(s.code,s.price)-prev)*s.sh;
     });
   }
 
@@ -586,15 +589,15 @@ function renderHsSummaryMetrics(){
     const usCost=usStockData.reduce((s,x)=>s+x.sh*x.avg,0);
     if(mkt==='US'){
       mv=usMv;cost=usCost;
-      usStockData.forEach(s=>{const p=prevPricesUS[s.code];if(p&&p>0)dayChg+=(s.price-p)*s.sh;});
+      usStockData.forEach(s=>{const p=livePrevClose(s.code,true);if(p&&p>0)dayChg+=(liveLastPrice(s.code,s.price)-p)*s.sh;});
       unrealized=usStockData.reduce((s,x)=>s+(x.ibPnl!==null?x.ibPnl:x.sh*(x.price-x.avg)),0);
       cash=ibCashUSD;
       nav=ibNavUSD>0?ibNavUSD:(usMv+ibCashUSD);
     } else {
       mv+=usMv*fxRate;cost+=usCost*fxRate;
       usStockData.forEach(s=>{
-        const p=prevPricesUS[s.code];
-        if(p&&p>0)dayChg+=(s.price-p)*s.sh*fxRate;
+        const p=livePrevClose(s.code,true);
+        if(p&&p>0)dayChg+=(liveLastPrice(s.code,s.price)-p)*s.sh*fxRate;
         unrealized+=(s.ibPnl!==null?s.ibPnl:s.sh*(s.price-s.avg))*fxRate;
       });
     }
@@ -713,7 +716,7 @@ function buildSparkSVG(data,prevClose,isUS,isIntraday){
 }
 
 function sparklineSVG(code,isUS){
-  const prev=isUS?prevPricesUS[code]:prevPrices[code];
+  const prev=livePrevClose(code,isUS);
   const candles=stockIntradayCandles[code];
   if(candles&&candles.length>=3)return buildSparkSVG(candles,prev,isUS,true);
   const hist=stockIndivHistory[code];
@@ -732,9 +735,11 @@ async function fetchFugleIntraday(symbol){
   return res.data.filter(d=>d.c!=null);
 }
 
-async function fetchYahooIntraday(sym){
+// code 有給時，把 Yahoo meta 的昨收記到 stockIntradayPrevClose（跟盤中K同交易日對齊）
+async function fetchYahooIntraday(sym,code){
   const res=await gas({action:'yahoo_chart',symbol:sym,interval:'5m',range:'1d'});
   if(!res.ok||!res.data?.length)throw new Error('no data');
+  if(code&&res.prev>0)stockIntradayPrevClose[code]=res.prev;
   return res.data.filter(d=>d.c!=null);
 }
 
@@ -742,9 +747,38 @@ async function fetchYahooIntraday(sym){
 async function fetchTWIntraday(code){
   try{const p=await fetchFugleIntraday(code);if(p.length>=3)return p;}catch(_){}
   for(const sfx of ['.TW','.TWO']){
-    try{const p=await fetchYahooIntraday(code+sfx);if(p.length>=3)return p;}catch(_){}
+    try{const p=await fetchYahooIntraday(code+sfx,code);if(p.length>=3)return p;}catch(_){}
   }
   throw new Error('no intraday');
+}
+
+// 昨收統一入口，依優先序：
+// 1. Yahoo chart meta 的昨收（跟盤中K同來源、同交易日，最可靠）
+// 2. 從個股收盤歷史找「盤中K交易日之前」的最後一筆收盤
+//    ——關鍵是相對『K線的交易日』而非日曆今天：凌晨看的是昨天的盤、
+//    假日看的是週五的盤，用日曆今天推昨收都會錯一天
+// 3. Sheet 同步的昨收 map（沒有盤中K可對日時的退回值）
+function livePrevClose(code,isUS){
+  const p=stockIntradayPrevClose[code];
+  if(p>0)return p;
+  const cd=stockIntradayCandles[code];
+  const hist=stockIndivHistory[code];
+  if(cd&&cd.length&&hist&&hist.length){
+    const t=cd[cd.length-1].t;
+    const dt=typeof t==='number'?new Date(t*1000):new Date(t);
+    if(!isNaN(dt.getTime())){
+      const sess=new Intl.DateTimeFormat('en-CA',{timeZone:isUS?'America/New_York':'Asia/Taipei'}).format(dt);
+      for(let i=hist.length-1;i>=0;i--){
+        if(hist[i].d<sess&&hist[i].price>0)return hist[i].price;
+      }
+    }
+  }
+  return isUS?prevPricesUS[code]:prevPrices[code];
+}
+// 最新價統一入口：有盤中K就用最新一根收盤，否則退回 Sheet 同步價
+function liveLastPrice(code,fallback){
+  const cd=stockIntradayCandles[code];
+  return cd&&cd.length?cd[cd.length-1].c:fallback;
 }
 
 function updateSparklineDOM(code,isUS){
@@ -784,6 +818,7 @@ async function _fetchAllSparklinesInner(){
     if(res.ok&&res.data){
       for(const {code,mkt:m} of need){
         const candles=res.data[code];
+        if(res.prev&&res.prev[code]>0)stockIntradayPrevClose[code]=res.prev[code];
         if(candles&&candles.length>=3){_applyIntradayCandles(code,candles);updateSparklineDOM(code,m==='US');gotAny=true;}
       }
     }
@@ -796,7 +831,7 @@ async function _fetchAllSparklinesInner(){
       while(idx<missing.length){
         const {code,mkt:m}=missing[idx++];
         try{
-          const candles=m==='TW'?await fetchTWIntraday(code):await fetchYahooIntraday(code);
+          const candles=m==='TW'?await fetchTWIntraday(code):await fetchYahooIntraday(code,code);
           if(candles.length>=3){_applyIntradayCandles(code,candles);updateSparklineDOM(code,m==='US');gotAny=true;}
         }catch(e){console.warn('sparkline',code,e.message);}
       }
@@ -812,7 +847,7 @@ async function _fetchAllSparklinesInner(){
 /* 盤中資料本地快取：重新整理頁面時即時走勢「秒開」，背景再刷新成最新 */
 const _ICK='inv_intraday_v1';
 function _saveIntradayCache(){
-  try{localStorage.setItem(_ICK,JSON.stringify({d:new Date().toDateString(),candles:stockIntradayCandles}));}catch(_){}
+  try{localStorage.setItem(_ICK,JSON.stringify({d:new Date().toDateString(),candles:stockIntradayCandles,prev:stockIntradayPrevClose}));}catch(_){}
 }
 function _restoreIntradayCache(){
   try{
@@ -821,6 +856,7 @@ function _restoreIntradayCache(){
       Object.keys(c.candles).forEach(code=>{
         if(c.candles[code]&&c.candles[code].length>=3)_applyIntradayCandles(code,c.candles[code]);
       });
+      if(c.prev)Object.keys(c.prev).forEach(code=>{if(c.prev[code]>0)stockIntradayPrevClose[code]=c.prev[code];});
     }
   }catch(_){}
 }
@@ -935,9 +971,8 @@ function renderTrendGrid(rows,container,period){
     // 漲跌用「最新盤中K收盤 vs 昨收」計算——Sheet 同步的 s.price 盤中會過期，跟走勢線對不上
     let chgCls,chgPct,chgVal;
     if(isIntraday){
-      const candles=stockIntradayCandles[r.s.code];
-      const live=(candles&&candles.length?candles[candles.length-1].c:0)||(r.s.price>0?r.s.price:0);
-      const prev=(r.isUS?prevPricesUS:prevPrices)[r.s.code];
+      const live=liveLastPrice(r.s.code,r.s.price>0?r.s.price:0);
+      const prev=livePrevClose(r.s.code,r.isUS);
       if(live>0&&prev>0){
         const pct=(live-prev)/prev*100;
         const amt=(live-prev)*r.s.sh;
@@ -995,12 +1030,12 @@ async function drawIntradayCard(code,mkt,containerId,isUS){
   if(!wrap)return;
   try{
     if(!stockIntradayCandles[code]||stockIntradayCandles[code].length<3){
-      const candles=mkt==='TW'?await fetchTWIntraday(code):await fetchYahooIntraday(code);
+      const candles=mkt==='TW'?await fetchTWIntraday(code):await fetchYahooIntraday(code,code);
       if(candles.length<3)throw new Error('no data');
       _applyIntradayCandles(code,candles);
     }
     const candles=stockIntradayCandles[code];
-    const prev=isUS?prevPricesUS[code]:prevPrices[code];
+    const prev=livePrevClose(code,isUS);
     wrap.className='trend-chart-wrap';
     wrap.innerHTML=buildBigSparkSVG(candles,prev,isUS);
   }catch(e){
@@ -1368,10 +1403,12 @@ function renderHoldingsTable(){
   // Build row data
   const rows=stocks.map(s=>{
     const isUS=s.mkt==='US';
-    const prev=isUS?prevPricesUS[s.code]:prevPrices[s.code];
+    // 當日變化用「盤中即時價 vs 同交易日昨收」；Sheet 同步價僅作退回
+    const prev=livePrevClose(s.code,isUS);
+    const livePrice=liveLastPrice(s.code,s.price);
     const hasPrev=prev&&prev>0;
-    const dayChgPct=hasPrev?(s.price-prev)/prev*100:null;
-    const dayChgAmt=hasPrev?(s.price-prev)*s.sh:null;
+    const dayChgPct=hasPrev?(livePrice-prev)/prev*100:null;
+    const dayChgAmt=hasPrev?(livePrice-prev)*s.sh:null;
     const fees=isUS?0:(tradeFees[s.code]||0);
     const costBasis=s.sheetCost&&s.sheetCost>0?s.sheetCost:(s.avg*s.sh+fees);
     const mv=s.sh*s.price;
@@ -1383,7 +1420,7 @@ function renderHoldingsTable(){
     const navPct=totalNAV>0?mvNTD/totalNAV*100:0;
     const rng=stockIntradayRange[s.code];
     const amplitude=(rng&&hasPrev)?(rng.h-rng.l)/prev*100:null;
-    return {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,mvNTD,amplitude};
+    return {s,isUS,hasPrev,livePrice,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,mvNTD,amplitude};
   });
 
   const totalCost=rows.reduce((s,r)=>s+r.costBasis*(r.isUS?fxRate:1),0);
@@ -1393,7 +1430,7 @@ function renderHoldingsTable(){
   const dir=holdingsSortDir==='asc'?1:-1;
   const sortMap={
     name:(a,b)=>dir*a.s.code.localeCompare(b.s.code),
-    price:(a,b)=>dir*(a.s.price-b.s.price),
+    price:(a,b)=>dir*((a.livePrice||a.s.price)-(b.livePrice||b.s.price)),
     dayPct:(a,b)=>dir*((a.dayChgPct??-Infinity)-(b.dayChgPct??-Infinity)),
     dayAmt:(a,b)=>dir*((a.dayChgAmt??-Infinity)-(b.dayChgAmt??-Infinity)),
     avg:(a,b)=>dir*(a.s.avg-b.s.avg),
@@ -1444,11 +1481,11 @@ function renderHoldingsTable(){
 
   // Cell renderer per column key
   function cell(key,r){
-    const {s,isUS,hasPrev,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,costPct,amplitude}=r;
+    const {s,isUS,hasPrev,livePrice,dayChgPct,dayChgAmt,costBasis,mv,unrealized,unrealPct,navPct,costPct,amplitude}=r;
     const cur=isUS?'$':'';const m=isUS?'US':'TW';const pc=v=>clsPNmkt(v,m);
     const sgn=v=>v===null?'--':(v>=0?'+':'-')+cur+Math.abs(Math.round(v)).toLocaleString();
     switch(key){
-      case 'price':    return `<td class="r">${s.price.toLocaleString()}</td>`;
+      case 'price':    return `<td class="r">${(livePrice||s.price).toLocaleString()}</td>`;
       case 'amplitude':return `<td class="r neu">${amplitude!=null?amplitude.toFixed(2)+'%':'--'}</td>`;
       case 'dayPct':   return `<td class="r ${hasPrev?pc(dayChgPct):'neu'}">${hasPrev?fmtPct(dayChgPct):'--'}</td>`;
       case 'dayAmt':   return `<td class="r ${hasPrev?pc(dayChgAmt):'neu'}">${hasPrev?sgn(dayChgAmt):'--'}</td>`;

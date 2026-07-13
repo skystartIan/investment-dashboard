@@ -1678,14 +1678,20 @@ function fetchIntradayBatch_(symbolsParam) {
     // 多裝置（手機+電腦）同時開頁面時不會重複打富果，也省 API 配額
     var CACHE_TTL = 45;
     var cache = CacheService.getScriptCache();
-    var out = {};
-    var cached = cache.getAll(items.map(function(it) { return 'idb_' + it.code; }));
+    var out = {};   // code → [candles]
+    var prevMap = {}; // code → 昨收（僅 Yahoo 來源有；富果為 null，前端退回 Sheet 昨收）
+    var cached = cache.getAll(items.map(function(it) { return 'idb2_' + it.code; }));
     items = items.filter(function(it) {
-      var hit = cached['idb_' + it.code];
+      var hit = cached['idb2_' + it.code];
       if (!hit) return true;
-      try { out[it.code] = JSON.parse(hit); return false; } catch (e) { return true; }
+      try {
+        var v = JSON.parse(hit);
+        out[it.code] = v.k;
+        if (v.p) prevMap[it.code] = v.p;
+        return false;
+      } catch (e) { return true; }
     });
-    if (!items.length) return { ok: true, data: out, cached: true };
+    if (!items.length) return { ok: true, data: out, prev: prevMap, cached: true };
 
     var apiKey = PropertiesService.getScriptProperties().getProperty('FUGLE_API_KEY') || '';
     var yahooReq_ = function(sym) {
@@ -1711,9 +1717,15 @@ function fetchIntradayBatch_(symbolsParam) {
     var resps = UrlFetchApp.fetchAll(reqs);
     var retry = [];
     items.forEach(function(it, i) {
-      var candles = it.mkt === 'US' ? _parseYahooCandles_(resps[i]) : _parseFugleCandles_(resps[i]);
-      if (candles && candles.length >= 3) out[it.code] = candles;
-      else if (it.mkt === 'TW') retry.push(it);
+      if (it.mkt === 'US') {
+        var y = _parseYahooCandles_(resps[i]);
+        if (y && y.k.length >= 3) { out[it.code] = y.k; if (y.p) prevMap[it.code] = y.p; }
+        // US 沒有退回來源，失敗就略過
+      } else {
+        var candles = _parseFugleCandles_(resps[i]);
+        if (candles && candles.length >= 3) out[it.code] = candles;
+        else retry.push(it);
+      }
     });
 
     // 第二/三輪：富果沒資料的台股批次退 Yahoo（假日也能拿到最近交易日走勢）
@@ -1722,8 +1734,8 @@ function fetchIntradayBatch_(symbolsParam) {
       var rs = UrlFetchApp.fetchAll(retry.map(function(it) { return yahooReq_(it.code + sfx); }));
       var next = [];
       retry.forEach(function(it, i) {
-        var candles = _parseYahooCandles_(rs[i]);
-        if (candles && candles.length >= 3) out[it.code] = candles;
+        var y = _parseYahooCandles_(rs[i]);
+        if (y && y.k.length >= 3) { out[it.code] = y.k; if (y.p) prevMap[it.code] = y.p; }
         else next.push(it);
       });
       retry = next;
@@ -1732,7 +1744,7 @@ function fetchIntradayBatch_(symbolsParam) {
     // 新抓到的寫入快取（單值 >100KB 會 put 失敗，逐鍵 try 不讓例外中斷回應）
     var toCache = {};
     items.forEach(function(it) {
-      if (out[it.code]) toCache['idb_' + it.code] = JSON.stringify(out[it.code]);
+      if (out[it.code]) toCache['idb2_' + it.code] = JSON.stringify({ k: out[it.code], p: prevMap[it.code] || null });
     });
     try { cache.putAll(toCache, CACHE_TTL); } catch (e) {
       Object.keys(toCache).forEach(function(k) {
@@ -1740,7 +1752,7 @@ function fetchIntradayBatch_(symbolsParam) {
       });
     }
 
-    return { ok: true, data: out };
+    return { ok: true, data: out, prev: prevMap };
   } catch (e) {
     return { ok: false, error: e.toString() };
   }
@@ -1757,16 +1769,21 @@ function _parseFugleCandles_(resp) {
   } catch (e) { return null; }
 }
 
+// 回傳 { k:[candles], p:昨收 }；昨收取自 Yahoo meta（跟盤中K同一交易日對齊，
+// 不會像 Sheet 同步價一樣在盤中過期）
 function _parseYahooCandles_(resp) {
   try {
     if (resp.getResponseCode() !== 200) return null;
     var json = JSON.parse(resp.getContentText());
     var res = json.chart && json.chart.result && json.chart.result[0];
     if (!res || !res.timestamp) return null;
+    var meta = res.meta || {};
+    var prev = meta.chartPreviousClose || meta.previousClose || null;
     var q = res.indicators.quote[0];
-    return res.timestamp.map(function(t, i) {
+    var k = res.timestamp.map(function(t, i) {
       return { t: t, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i] };
     }).filter(function(r) { return r.c != null; });
+    return { k: k, p: prev };
   } catch (e) { return null; }
 }
 
@@ -1783,10 +1800,12 @@ function fetchYahooChart_(symbol, interval, range) {
     var json = JSON.parse(resp.getContentText());
     var res = json.chart && json.chart.result && json.chart.result[0];
     if (!res) return { ok: false };
+    var meta = res.meta || {};
     var ts = res.timestamp;
     var q  = res.indicators.quote[0];
     return {
       ok: true,
+      prev: meta.chartPreviousClose || meta.previousClose || null,
       data: ts.map(function(t, i) {
         return { t: t, d: new Date(t * 1000).toISOString().slice(0, 10),
                  o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i] };
