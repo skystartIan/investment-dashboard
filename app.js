@@ -931,14 +931,26 @@ function renderTrendGrid(rows,container,period){
   const cur=isUS=>isUS?'$':'';
   const isIntraday=period==='intraday';
   container.innerHTML=rows.map(r=>{
-    const urCls=r.isUS?clsPN(r.unrealPct||0):clsPNmkt(r.unrealPct||0,'TW');
-    const urPct=fmtPct(r.unrealPct||0);
-    const urVal=(r.unrealized>=0?'+':'−')+cur(r.isUS)+Math.abs(Math.round(r.unrealized)).toLocaleString();
+    // 即時卡片右上角顯示「當日漲跌幅＋當日盈虧」；日K/周K 維持未實現損益
+    let chgCls,chgPct,chgVal;
+    if(isIntraday){
+      if(r.hasPrev&&r.dayChgPct!=null){
+        chgCls=clsPNmkt(r.dayChgPct,r.isUS?'US':'TW');
+        chgPct=fmtPct(r.dayChgPct);
+        chgVal=(r.dayChgAmt>=0?'+':'−')+cur(r.isUS)+Math.abs(Math.round(r.dayChgAmt)).toLocaleString();
+      }else{
+        chgCls='neu';chgPct='--';chgVal='';
+      }
+    }else{
+      chgCls=r.isUS?clsPN(r.unrealPct||0):clsPNmkt(r.unrealPct||0,'TW');
+      chgPct=fmtPct(r.unrealPct||0);
+      chgVal=(r.unrealized>=0?'+':'−')+cur(r.isUS)+Math.abs(Math.round(r.unrealized)).toLocaleString();
+    }
     return `<div class="trend-card">
       <div class="trend-card-hdr">
         <span class="trend-card-ticker">${r.s.code}</span>
         <span class="trend-card-name">${r.s.name}</span>
-        <span class="trend-card-chg ${urCls}">${urPct} <span class="trend-card-urval">${urVal}</span></span>
+        <span class="trend-card-chg ${chgCls}">${chgPct} <span class="trend-card-urval">${chgVal}</span></span>
       </div>
       <div id="trd-${r.s.code}" class="trend-chart-wrap k-loading">載入中...</div>
     </div>`;
