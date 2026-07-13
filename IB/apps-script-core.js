@@ -1661,6 +1661,115 @@ function fetchFugleIntraday_(symbol) {
   }
 }
 
+// ════════════════════════════════════════════════════════════════
+// 批次盤中K：一次 HTTP 進來，GAS 端用 UrlFetchApp.fetchAll 平行打富果/Yahoo
+// symbols 格式 "2330:TW,00919:TW,AAPL:US"；回傳 { ok, data: {code: [candles]} }
+// TW 先走富果，失敗的再批次退 Yahoo .TW → .TWO；US 直接 Yahoo 5m
+// ════════════════════════════════════════════════════════════════
+function fetchIntradayBatch_(symbolsParam) {
+  try {
+    var items = String(symbolsParam || '').split(',').map(function(s) {
+      var p = s.split(':');
+      return { code: p[0].trim(), mkt: (p[1] || 'TW').trim().toUpperCase() };
+    }).filter(function(it) { return it.code; });
+    if (!items.length) return { ok: false, error: 'no symbols' };
+
+    // CacheService：每檔各存一鍵（單值上限 100KB，整批存會爆），45 秒內重複請求直接回快取
+    // 多裝置（手機+電腦）同時開頁面時不會重複打富果，也省 API 配額
+    var CACHE_TTL = 45;
+    var cache = CacheService.getScriptCache();
+    var out = {};
+    var cached = cache.getAll(items.map(function(it) { return 'idb_' + it.code; }));
+    items = items.filter(function(it) {
+      var hit = cached['idb_' + it.code];
+      if (!hit) return true;
+      try { out[it.code] = JSON.parse(hit); return false; } catch (e) { return true; }
+    });
+    if (!items.length) return { ok: true, data: out, cached: true };
+
+    var apiKey = PropertiesService.getScriptProperties().getProperty('FUGLE_API_KEY') || '';
+    var yahooReq_ = function(sym) {
+      return {
+        url: 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(sym)
+           + '?interval=5m&range=1d&includePrePost=false',
+        method: 'get',
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' },
+        muteHttpExceptions: true
+      };
+    };
+
+    // 第一輪：TW→富果 1分K、US→Yahoo 5分K，全部平行
+    var reqs = items.map(function(it) {
+      if (it.mkt === 'US') return yahooReq_(it.code);
+      return {
+        url: 'https://api.fugle.tw/marketdata/v1.0/stock/intraday/candles/' + encodeURIComponent(it.code),
+        method: 'get',
+        headers: { 'X-API-KEY': apiKey },
+        muteHttpExceptions: true
+      };
+    });
+    var resps = UrlFetchApp.fetchAll(reqs);
+    var retry = [];
+    items.forEach(function(it, i) {
+      var candles = it.mkt === 'US' ? _parseYahooCandles_(resps[i]) : _parseFugleCandles_(resps[i]);
+      if (candles && candles.length >= 3) out[it.code] = candles;
+      else if (it.mkt === 'TW') retry.push(it);
+    });
+
+    // 第二/三輪：富果沒資料的台股批次退 Yahoo（假日也能拿到最近交易日走勢）
+    ['.TW', '.TWO'].forEach(function(sfx) {
+      if (!retry.length) return;
+      var rs = UrlFetchApp.fetchAll(retry.map(function(it) { return yahooReq_(it.code + sfx); }));
+      var next = [];
+      retry.forEach(function(it, i) {
+        var candles = _parseYahooCandles_(rs[i]);
+        if (candles && candles.length >= 3) out[it.code] = candles;
+        else next.push(it);
+      });
+      retry = next;
+    });
+
+    // 新抓到的寫入快取（單值 >100KB 會 put 失敗，逐鍵 try 不讓例外中斷回應）
+    var toCache = {};
+    items.forEach(function(it) {
+      if (out[it.code]) toCache['idb_' + it.code] = JSON.stringify(out[it.code]);
+    });
+    try { cache.putAll(toCache, CACHE_TTL); } catch (e) {
+      Object.keys(toCache).forEach(function(k) {
+        try { cache.put(k, toCache[k], CACHE_TTL); } catch (e2) {}
+      });
+    }
+
+    return { ok: true, data: out };
+  } catch (e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+function _parseFugleCandles_(resp) {
+  try {
+    if (resp.getResponseCode() !== 200) return null;
+    var json = JSON.parse(resp.getContentText());
+    if (!json.data || !json.data.length) return null;
+    return json.data.map(function(d) {
+      return { t: d.date, c: d.close, o: d.open, h: d.high, l: d.low };
+    }).filter(function(r) { return r.c != null; });
+  } catch (e) { return null; }
+}
+
+function _parseYahooCandles_(resp) {
+  try {
+    if (resp.getResponseCode() !== 200) return null;
+    var json = JSON.parse(resp.getContentText());
+    var res = json.chart && json.chart.result && json.chart.result[0];
+    if (!res || !res.timestamp) return null;
+    var q = res.indicators.quote[0];
+    return res.timestamp.map(function(t, i) {
+      return { t: t, o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i] };
+    }).filter(function(r) { return r.c != null; });
+  } catch (e) { return null; }
+}
+
 function fetchYahooChart_(symbol, interval, range) {
   try {
     var url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + symbol

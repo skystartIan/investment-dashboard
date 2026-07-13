@@ -41,6 +41,11 @@ function doGet(e) {
       return _json(fetchFugleIntraday_(p.symbol));
     }
 
+    // 批次盤中K：symbols="2330:TW,00919:TW,AAPL:US"，一次回傳全部（前端只需一個 round-trip）
+    if (action === 'intraday_batch') {
+      return _json(fetchIntradayBatch_(p.symbols));
+    }
+
     // 讀取每日預抓的日K/周K快取
     if (action === 'read_kcache') {
       return _json(readKCache_());
@@ -94,6 +99,10 @@ function doPost(e) {
 
     if (action === 'fugle_intraday') {
       return _json(fetchFugleIntraday_(payload.symbol));
+    }
+
+    if (action === 'intraday_batch') {
+      return _json(fetchIntradayBatch_(payload.symbols));
     }
 
     if (action === 'read_kcache') {
