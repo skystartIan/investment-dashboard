@@ -15,3 +15,17 @@ __pycache__/
 # 本機 log
 logs/
 *.log
+
+# 備份 / 除錯暫存檔
+*.bak
+debug_*
+
+# 本機執行環境（瀏覽器 profile、下載暫存、驗證碼資料、API DLL）
+chrome_profile/
+downloads/
+captcha_db/
+*.dll
+*.cer
+
+# Claude Code 本機設定
+.claude/
