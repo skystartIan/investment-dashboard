@@ -932,12 +932,18 @@ function renderTrendGrid(rows,container,period){
   const isIntraday=period==='intraday';
   container.innerHTML=rows.map(r=>{
     // 即時卡片右上角顯示「當日漲跌幅＋當日盈虧」；日K/周K 維持未實現損益
+    // 漲跌用「最新盤中K收盤 vs 昨收」計算——Sheet 同步的 s.price 盤中會過期，跟走勢線對不上
     let chgCls,chgPct,chgVal;
     if(isIntraday){
-      if(r.hasPrev&&r.dayChgPct!=null){
-        chgCls=clsPNmkt(r.dayChgPct,r.isUS?'US':'TW');
-        chgPct=fmtPct(r.dayChgPct);
-        chgVal=(r.dayChgAmt>=0?'+':'−')+cur(r.isUS)+Math.abs(Math.round(r.dayChgAmt)).toLocaleString();
+      const candles=stockIntradayCandles[r.s.code];
+      const live=(candles&&candles.length?candles[candles.length-1].c:0)||(r.s.price>0?r.s.price:0);
+      const prev=(r.isUS?prevPricesUS:prevPrices)[r.s.code];
+      if(live>0&&prev>0){
+        const pct=(live-prev)/prev*100;
+        const amt=(live-prev)*r.s.sh;
+        chgCls=clsPNmkt(pct,r.isUS?'US':'TW');
+        chgPct=fmtPct(pct);
+        chgVal=(amt>=0?'+':'−')+cur(r.isUS)+Math.abs(Math.round(amt)).toLocaleString();
       }else{
         chgCls='neu';chgPct='--';chgVal='';
       }
