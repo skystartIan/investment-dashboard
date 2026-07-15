@@ -38,6 +38,7 @@ let usBenchQQQ=false, usBenchSPY=false, usBenchNASDAQ=false;
 let lineChartInst=null,usNavChartInst=null,hsSummaryChartInst=null;
 let hsPeriodMode='YTD';
 let divYearFilter='2026';
+let divOnlyReceived=localStorage.getItem('divOnlyRcv')==='1';  // 股利合計是否排除尚未除息的 upcoming
 let tradeFilter='all';
 let allTrades=[],usTradesData=[];
 let dividendsTW=[];
@@ -2015,15 +2016,17 @@ async function loadUSDividends(twRecs){
 function renderDivTable(records){
   const years=[...new Set(records.map(r=>r.date.slice(0,4)))].sort((a,b)=>b-a);
   const wrap=document.getElementById('div-year-wrap');
-  wrap.innerHTML=years.map(y=>`<button class="sc-btn${y===divYearFilter?' on':''}" onclick="divYearFilter='${y}';renderDividends()">${y}</button>`).join('');
-  const filtered=records.filter(r=>r.date.startsWith(divYearFilter));
+  wrap.innerHTML=years.map(y=>`<button class="sc-btn${y===divYearFilter?' on':''}" onclick="divYearFilter='${y}';renderDividends()">${y}</button>`).join('')
+    +`<button class="sc-btn${divOnlyReceived?' on':''}" onclick="divOnlyReceived=!divOnlyReceived;localStorage.setItem('divOnlyRcv',divOnlyReceived?'1':'0');renderDividends()" title="開啟後合計與列表只計入已除息的股利，排除已公告未除息的">已入袋</button>`;
+  let filtered=records.filter(r=>r.date.startsWith(divYearFilter));
+  if(divOnlyReceived)filtered=filtered.filter(r=>r.status!=='upcoming');
   const total=filtered.reduce((s,r)=>s+Math.abs(r.amount)*(r.currency==='TWD'?1:fxRate),0);
   const body=document.getElementById('div-body');
   if(!filtered.length){
     body.innerHTML=`<div style="text-align:center;padding:40px;color:#8E8E93;font-size:.9rem">${divYearFilter} 年無紀錄</div>`;
     return;
   }
-  const sumHtml=`<div class="div-sum">💰 ${divYearFilter} 年股利合計：NT$${Math.round(total).toLocaleString()}</div>`;
+  const sumHtml=`<div class="div-sum">💰 ${divYearFilter} 年股利合計${divOnlyReceived?'（已入袋）':''}：NT$${Math.round(total).toLocaleString()}</div>`;
   body.innerHTML=sumHtml+filtered.map(r=>{
     const isDividend=r.type==='Dividends';
     const cur=r.currency==='TWD'?'NT$':'$';

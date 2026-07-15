@@ -207,25 +207,32 @@ def parse_ex_dividends(raw: dict, holding_codes: set) -> list:
 
 
 def build_dividend_rows(ex_div_list: list, trades: list, today: str = None) -> list:
-    """套用「重播持股」與「status 判斷」，回傳可寫入 dividends_tw 的 row 清單（list of list）"""
+    """套用「重播持股」與「status 判斷」，回傳可寫入 dividends_tw 的 row 清單（list of list）
+
+    status 三態：
+      upcoming  — 除息日未到（shares/amount 留空，前端用現有持股估算顯示）
+      received  — 除息日已過且當時有持股（shares/amount 為確定值）
+      cancelled — 除息日已過但除息前已清倉：不新增，且讓 sync 刪掉先前寫入的 upcoming 列
+    """
     today = today or date.today().isoformat()
     rows = []
     for item in ex_div_list:
         is_future = item['date'] > today
         if is_future:
-            # upcoming：用目前持股數估算金額（僅供顯示參考，未實際發生）
-            shares = None  # 前端可自行用 holdings_tw 即時數字顯示，這裡先留空
+            shares_val = ''
             amount = ''
             status = 'upcoming'
-            shares_val = ''
         else:
             shares = shares_at_date(trades, item['code'], item['date'])
             if shares <= 0:
-                log(f'  跳過 {item["code"]} {item["date"]}：除息前已無持股')
-                continue
-            amount = round(shares * item['cps'], 2)
-            status = 'received'
-            shares_val = shares
+                log(f'  {item["code"]} {item["date"]}：除息前已無持股 → 標記 cancelled')
+                shares_val = 0
+                amount = 0
+                status = 'cancelled'
+            else:
+                amount = round(shares * item['cps'], 2)
+                status = 'received'
+                shares_val = shares
 
         rows.append([
             item['date'], item['code'], item['name'], shares_val,
@@ -235,7 +242,15 @@ def build_dividend_rows(ex_div_list: list, trades: list, today: str = None) -> l
 
 
 def sync_dividends(wb, ex_div_raw: dict):
-    """主流程：讀 holdings/trades → 過濾解析 → 寫入 dividends_tw（dedup）"""
+    """主流程：讀 holdings/trades → 過濾解析 → 寫入 dividends_tw
+
+    寫入策略（不再是純 append+dedup，否則 upcoming 列永遠凍結）：
+      - (date, code) 不存在 → append（cancelled 除外）
+      - 已存在且是 upcoming：
+          新算出 received  → 原地更新該列（補上 shares/amount，狀態轉正）
+          新算出 cancelled → 刪除該列（除息前已清倉，領不到）
+      - 已存在且是 received → 不動（確定值不覆蓋）
+    """
     holding_codes = read_holding_codes(wb)
     log(f'目前持股代號：{sorted(holding_codes)}')
 
@@ -246,12 +261,45 @@ def sync_dividends(wb, ex_div_raw: dict):
     log(f'過濾後剩 {len(ex_div_list)} 筆持股相關除息資料')
 
     rows = build_dividend_rows(ex_div_list, trades)
-    log(f'產生 {len(rows)} 筆待寫入紀錄')
+    log(f'產生 {len(rows)} 筆待處理紀錄')
 
     ws = get_or_create_sheet(wb, 'dividends_tw', DIVIDENDS_HEADERS)
-    added = append_rows_dedup(ws, DIVIDENDS_HEADERS, rows, key_cols=['date', 'code'])
-    log(f'✓ dividends_tw 新增 {added} 筆（{len(rows) - added} 筆已存在，略過）')
-    return added
+    all_vals = _with_retry(lambda: ws.get_all_values())
+    st_i = DIVIDENDS_HEADERS.index('status')
+    # (date, code) → (工作表列號 1-based, 現有 status)
+    index = {}
+    for i, r in enumerate(all_vals[1:], start=2):
+        if len(r) >= 2 and r[0]:
+            index[(r[0], str(r[1]).strip())] = (i, r[st_i].strip() if len(r) > st_i else '')
+
+    to_append, to_delete = [], []
+    updated = 0
+    for row in rows:
+        key = (row[0], str(row[1]))
+        status_new = row[st_i]
+        if key not in index:
+            if status_new != 'cancelled':
+                to_append.append(row)
+            continue
+        row_num, status_old = index[key]
+        if status_old != 'upcoming':
+            continue  # received 等確定狀態不覆蓋
+        if status_new == 'received':
+            _with_retry(lambda rn=row_num, rw=row: ws.update(
+                values=[rw], range_name=f'A{rn}:H{rn}', value_input_option='RAW'))
+            log(f'  ↻ {key[1]} {key[0]} upcoming → received（{row[3]}股, NT${row[5]}）')
+            updated += 1
+        elif status_new == 'cancelled':
+            to_delete.append(row_num)
+            log(f'  ✂ {key[1]} {key[0]} 除息前已清倉 → 刪除 upcoming 列')
+
+    for rn in sorted(to_delete, reverse=True):   # 由下往上刪，避免列號位移
+        _with_retry(lambda r=rn: ws.delete_rows(r))
+
+    if to_append:
+        _with_retry(lambda: ws.append_rows(to_append, value_input_option='RAW'))
+    log(f'✓ dividends_tw 新增 {len(to_append)} 筆、轉正 {updated} 筆、刪除 {len(to_delete)} 筆')
+    return len(to_append)
 
 
 def migrate_historical_records(wb):
