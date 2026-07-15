@@ -130,8 +130,12 @@ def fill_input(page, selector: str, value: str):
 # CAPTCHA：Claude API
 # ──────────────────────────────────────────────────────────
 
-def solve_captcha_claude(question: str, images: list) -> list:
-    """images: [{'id', 'base64', 'content_type'}] → 回傳正確 id 列表"""
+def solve_captcha_claude(question: str, images: list) -> tuple:
+    """images: [{'id', 'base64', 'content_type'}] → 回傳 (正確 id 列表, {id: 類別標籤})
+
+    要求 Claude 標記「每一張」圖的類別，而不只挑出正確的：
+    非目標圖片的標籤也存入資料庫，未來 6 張全認得時才可能跳過 API。
+    """
     log(f'呼叫 Claude API 判斷 CAPTCHA: {question}')
     import anthropic
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
@@ -142,9 +146,13 @@ def solve_captcha_claude(question: str, images: list) -> list:
             'text': (
                 f'你是圖片辨識專家。題目是：{question}\n\n'
                 '以下每張圖片都有對應的 id，請仔細辨識每張圖片的內容'
-                '（注意：圖片可能是插圖、卡通、圖示風格），判斷哪些圖片符合題目要求。\n\n'
+                '（注意：圖片可能是插圖、卡通、圖示風格）。\n\n'
+                '請做兩件事：\n'
+                '1. 為每一張圖片標記類別（2~6 字的簡短中文名詞，例如「香蕉」「熱氣球」；'
+                '若符合題目要求的類別，請直接使用題目【】內的原字串當標籤）\n'
+                '2. 列出符合題目要求的圖片 id\n\n'
                 '重要：只回傳 JSON 格式，不要有任何其他文字或 markdown：'
-                '{"correct_ids": ["id1", "id2"]}'
+                '{"labels": {"id1": "類別", "id2": "類別"}, "correct_ids": ["id1"]}'
             ),
         }
     ]
@@ -161,13 +169,13 @@ def solve_captcha_claude(question: str, images: list) -> list:
 
     resp = client.messages.create(
         model='claude-haiku-4-5-20251001',
-        max_tokens=200,
+        max_tokens=500,
         messages=[{'role': 'user', 'content': content}],
     )
     text = resp.content[0].text.strip()
     text = text.replace('```json', '').replace('```', '').strip()
     parsed = json.loads(text[text.index('{'):text.rindex('}') + 1])
-    return parsed.get('correct_ids', [])
+    return parsed.get('correct_ids', []), parsed.get('labels', {})
 
 # ──────────────────────────────────────────────────────────
 # CAPTCHA：本地資料庫（透過 config server）
@@ -177,22 +185,36 @@ def lookup_captcha_db(images: list) -> dict:
     try:
         payload = {'images': [{'id': img['id'], 'b64': img['base64']} for img in images]}
         r = req_lib.post(f'{CONFIG_SERVER}/captcha/lookup', json=payload, timeout=5)
-        return r.json().get('results', {})
-    except Exception:
+        results = r.json().get('results', {})
+        known = sum(1 for v in results.values() if v.get('label'))
+        log(f'[CAPTCHA DB] lookup: {known}/{len(images)} 張已認得')
+        return results
+    except Exception as e:
+        log(f'[CAPTCHA DB] lookup 失敗（將全靠 Claude API）: {e}')
         return {}
 
 
-def save_captcha_db(images: list, label: str):
+def save_captcha_db(images: list):
+    """images 需各自帶 'label' 和 'hashes'；server 端會自動跳過重複圖片"""
     try:
         payload = {
             'images': [
-                {'b64': img['base64'], 'hashes': img.get('hashes', {}), 'label': label}
+                {'b64': img['base64'], 'hashes': img.get('hashes', {}), 'label': img.get('label', '')}
                 for img in images
             ]
         }
-        req_lib.post(f'{CONFIG_SERVER}/captcha/save', json=payload, timeout=5)
-    except Exception:
-        pass
+        r = req_lib.post(f'{CONFIG_SERVER}/captcha/save', json=payload, timeout=5)
+        resp = r.json()
+        log(f'[CAPTCHA DB] save: 送出 {len(images)} 張，新增 {resp.get("saved", "?")} 筆，資料庫共 {resp.get("total", "?")} 筆')
+    except Exception as e:
+        log(f'[CAPTCHA DB] save 失敗: {e}')
+
+
+def label_matches(label, target) -> bool:
+    """類別比對：完全相等，或互為子字串（「機車」可命中「摩托車/機車」）"""
+    if not label or not target:
+        return False
+    return label == target or label in target or target in label
 
 
 def resolve_captcha(question: str, images: list) -> list:
@@ -207,19 +229,32 @@ def resolve_captcha(question: str, images: list) -> list:
             img['label']  = db_results[img['id']].get('label')
 
     if target_label:
+        # 必須 6 張全認得才能作答：不認得的圖無法排除是目標類別
         all_known = all(img.get('label') is not None for img in images)
         if all_known:
-            correct_ids = [img['id'] for img in images if img.get('label') == target_label]
+            correct_ids = [img['id'] for img in images if label_matches(img.get('label'), target_label)]
             if correct_ids:
                 log('✅ 資料庫命中！')
                 return correct_ids
 
-    correct_ids = solve_captcha_claude(question, images)
+    correct_ids, labels = solve_captcha_claude(question, images)
 
-    if target_label and correct_ids:
-        correct_imgs = [img for img in images if img['id'] in correct_ids and img.get('hashes')]
-        if correct_imgs:
-            save_captcha_db(correct_imgs, target_label)
+    if target_label:
+        # 6 張全部入庫（正確的用題目原字串、其餘用 Claude 給的類別），
+        # 只存答對那幾張的話 all_known 永遠湊不齊，資料庫永遠不會命中
+        to_save = []
+        for img in images:
+            if not img.get('hashes'):
+                continue
+            if img['id'] in correct_ids:
+                img['label'] = target_label
+            elif labels.get(img['id']):
+                img['label'] = labels[img['id']]
+            else:
+                continue
+            to_save.append(img)
+        if to_save:
+            save_captcha_db(to_save)
 
     return correct_ids
 

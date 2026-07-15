@@ -249,6 +249,10 @@ def get_or_create_sheet(wb, name, headers):
         print(f'  [重設 header] {name}')
     return ws
 
+def norm_code(v):
+    """股票代號正規化：gspread 會把 "0050" 讀成 int 50，統一補回 4 碼字串。"""
+    return str(v).strip().lstrip("'").zfill(4)
+
 def sheet_to_dicts(ws):
     return ws.get_all_records()
 
@@ -258,16 +262,21 @@ def overwrite_sheet(ws, headers, rows):
     if rows:
         ws.append_rows(rows, value_input_option='USER_ENTERED')
 
+def _key_val(col, val):
+    """比對用正規化：code 補零成 4 碼，其餘去除前後空白。"""
+    s = str(val).strip().lstrip("'")
+    return s.zfill(4) if col == 'code' else s
+
 def append_rows_dedup(ws, headers, new_rows, key_cols):
     existing = ws.get_all_records()
     exist_keys = set()
     for r in existing:
-        k = tuple(str(r.get(c, '')) for c in key_cols)
+        k = tuple(_key_val(c, r.get(c, '')) for c in key_cols)
         exist_keys.add(k)
 
     to_add = []
     for row in new_rows:
-        k = tuple(str(row[headers.index(c)]) for c in key_cols)
+        k = tuple(_key_val(c, row[headers.index(c)]) for c in key_cols)
         if k not in exist_keys:
             to_add.append(row)
             exist_keys.add(k)
@@ -575,11 +584,12 @@ def detect_dca(today_holdings, yesterday_holdings, today_trades, today_str):
     today_date = datetime.date.fromisoformat(today_str)
     dca_trades = []
     # 只排除已有「定期定額」記錄的 code，一般盤中零股買賣不應阻擋 DCA 偵測
-    dca_traded_codes = {t['code'] for t in today_trades if t.get('trade_type') == '定期定額'}
-    yesterday_map = {h['ticker']: h for h in yesterday_holdings}
+    dca_traded_codes = {norm_code(t['code']) for t in today_trades if t.get('trade_type') == '定期定額'}
+    # yesterday_holdings 由 gspread 讀回，"0050" 會被轉成 int 50，故兩邊都要正規化
+    yesterday_map = {norm_code(h['ticker']): h for h in yesterday_holdings}
 
     for h in today_holdings:
-        code = h['ticker']
+        code = norm_code(h['ticker'])
         if code not in DCA_RULES:
             continue
         rule = DCA_RULES[code]
@@ -777,8 +787,9 @@ def main():
 
     try:
         # ── 0. 判斷是否為交易日 ──
-        # 用 TWSE 即時報價的加權指數成交價 z 判斷：有值代表盤中/已收盤有成交，
-        # z=='-' 代表尚未開盤或非交易日（此 API 為即時盤中資料，無歷史）。
+        # 用 TWSE 即時報價的加權指數判斷。注意：非交易日此 API 仍會回傳「上一個
+        # 交易日」的收盤價（z 有值），單看 z 會誤判（2026-07-10 即因此寫入整列
+        # 複製自 07-09 的假資料），故必須同時比對資料日期 d 是否為今天。
         print('\n[0] 確認今日是否為交易日...')
         is_trading = False
 
@@ -789,8 +800,11 @@ def main():
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
                 z = data['msgArray'][0].get('z', '-')
+                d = data['msgArray'][0].get('d', '')
                 if z == '-':
                     print(f'  今日 {today_str} 尚未開盤或非交易日（無即時成交價），結束。')
+                elif d != today_str.replace('-', ''):
+                    print(f'  今日 {today_str} 非交易日：報價日期為 {d}（上一個交易日），結束。')
                 else:
                     print(f'  ✓ 今日為交易日，大盤最新價：{z}')
                     is_trading = True
@@ -950,6 +964,9 @@ def main():
 
         if all_trades:
             trade_rows = [[t[k] for k in HEADERS['trades_tw']] for t in all_trades]
+            code_i = HEADERS['trades_tw'].index('code')
+            for r in trade_rows:
+                r[code_i] = "'" + norm_code(r[code_i])   # 保留前導零，避免 0050 被存成 50
             added = append_rows_dedup(ws_trades, HEADERS['trades_tw'], trade_rows,
                                       key_cols=['date','code','side','qty','order_no'])
             print(f'  ✓ trades_tw 新增 {added} 筆')
@@ -961,6 +978,10 @@ def main():
         if len(all_trade_data) > 2:
             hdr_row   = all_trade_data[0]
             data_rows = sorted(all_trade_data[1:], key=lambda r: r[0], reverse=True)
+            code_i = hdr_row.index('code')
+            for r in data_rows:
+                if len(r) > code_i:
+                    r[code_i] = "'" + norm_code(r[code_i])   # 重寫時同樣要保留前導零
             ws_trades.clear()
             ws_trades.append_row(hdr_row, value_input_option='RAW')
             ws_trades.append_rows(data_rows, value_input_option='USER_ENTERED')

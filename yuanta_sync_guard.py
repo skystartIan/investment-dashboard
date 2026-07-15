@@ -18,6 +18,14 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 
+# guard 自身的 stdout 也要 utf-8：排程環境預設 cp1252，
+# 轉寫子腳本的中文輸出時會 UnicodeEncodeError
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 # ── SSL：32 位元 Python 預設憑證庫缺標準根憑證，改用 certifi ──
 # （與 yuanta_sync.py 一致，否則連 api.telegram.org 會 CERTIFICATE_VERIFY_FAILED）
 try:
@@ -27,10 +35,15 @@ except Exception:
     _SSL_CTX = None
 
 BASE_DIR = Path(__file__).parent
-SYNC_SCRIPT = BASE_DIR / 'yuanta_sync.py'
 
-# yuanta_sync.py 需要 32 位元 Python（元大 OneAPI DLL 限制）
-SYNC_PYTHON = r'C:\Python311-32\python.exe'
+# 用法：python yuanta_sync_guard.py [目標腳本] [python執行檔]
+# 不帶參數時維持原行為（包 yuanta_sync.py，用 32 位元 Python）
+SYNC_SCRIPT = Path(sys.argv[1]) if len(sys.argv) > 1 else BASE_DIR / 'yuanta_sync.py'
+if not SYNC_SCRIPT.is_absolute():
+    SYNC_SCRIPT = BASE_DIR / SYNC_SCRIPT
+
+# yuanta_sync.py 需要 32 位元 Python（元大 OneAPI DLL 限制）；其他腳本可指定
+SYNC_PYTHON = sys.argv[2] if len(sys.argv) > 2 else r'C:\Python311-32\python.exe'
 
 
 def load_env():
@@ -67,7 +80,7 @@ def main():
     # 提前檢查：連檔案都不在就直接通知（不必等 subprocess）
     if not SYNC_SCRIPT.exists():
         telegram_notify(
-            f'🚨 YuantaSync 排程異常\n'
+            f'🚨 {SYNC_SCRIPT.stem} 排程異常\n'
             f'時間：{now}\n'
             f'原因：找不到 {SYNC_SCRIPT.name}（檔案遺失）'
         )
@@ -77,6 +90,9 @@ def main():
     python_exe = SYNC_PYTHON if Path(SYNC_PYTHON).exists() else sys.executable
 
     tail = collections.deque(maxlen=30)   # 保留最後 30 行供通知使用
+    # 子腳本的中文 print 在排程環境（無 console、預設 cp1252）會 UnicodeEncodeError，
+    # 必須強制 utf-8，否則腳本本身邏輯正確也會以 exit 1 收場
+    child_env = {**os.environ, 'PYTHONIOENCODING': 'utf-8'}
     proc = subprocess.Popen(
         [python_exe, str(SYNC_SCRIPT)],
         cwd=str(BASE_DIR),
@@ -85,6 +101,7 @@ def main():
         text=True,
         encoding='utf-8',
         errors='replace',
+        env=child_env,
     )
     for line in proc.stdout:
         sys.stdout.write(line)      # 原樣輸出，維持排程/終端可見
@@ -98,13 +115,13 @@ def main():
             hint = '（找不到檔案／無法啟動）'
         tail_txt = '\n'.join(tail).strip() or '(無輸出)'
         telegram_notify(
-            f'🚨 YuantaSync 排程異常\n'
+            f'🚨 {SYNC_SCRIPT.stem} 排程異常\n'
             f'時間：{now}\n'
             f'結束碼：{code} {hint}\n'
             f'—— 最後輸出 ——\n'
             f'{tail_txt[-800:]}'
         )
-        print(f'[guard] yuanta_sync.py 以非 0 結束（{code}），已發送 Telegram 通知')
+        print(f'[guard] {SYNC_SCRIPT.name} 以非 0 結束（{code}），已發送 Telegram 通知')
 
     sys.exit(code)
 
