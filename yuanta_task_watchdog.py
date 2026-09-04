@@ -110,6 +110,24 @@ def run_check():
     return proc.returncode, (proc.stdout or '') + (proc.stderr or '')
 
 
+def run_prices_scan(days=10):
+    """跑 yuanta_prices_backfill.py --scan，回傳 (缺口數, 輸出)。
+    腳本不在或跑不起來時回 (0, 說明) —— 缺少這一層不該讓整個守望失敗。"""
+    script = BASE_DIR / 'yuanta_prices_backfill.py'
+    if not script.exists():
+        return 0, f'[scan] 找不到 {script.name}，略過資料缺口檢查'
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script), '--scan', str(days)],
+            cwd=str(BASE_DIR), capture_output=True,
+            text=True, encoding='utf-8', errors='replace', timeout=300,
+            env={**os.environ, 'PYTHONIOENCODING': 'utf-8'},
+        )
+        return proc.returncode, (proc.stdout or '') + (proc.stderr or '')
+    except Exception as e:
+        return 0, f'[scan] 無法執行：{e}'
+
+
 def main():
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -135,26 +153,42 @@ def main():
 
     print(out)
 
-    if code == 0 and not FORCE:
-        log('[watchdog] 五個排程正常，不發通知')
+    # 排程有沒有跑，跟資料完不完整，是兩件事。
+    # 2026-09-03 那天兩件都出事；2026-09-04 排程全綠，但 us_prices 照樣缺一天。
+    # 所以這裡另外查 prices_tw 有沒有洞 —— 結束碼＝真正的缺口數（已排除假日）。
+    gaps_code, gaps_out = run_prices_scan()
+    print(gaps_out)
+
+    if code == 0 and gaps_code == 0 and not FORCE:
+        log('[watchdog] 五個排程正常、prices_tw 無缺口，不發通知')
         sys.exit(0)
 
     # 只取表格與結論，避開 downloads 清單那段雜訊
     body = out.strip()
-    if len(body) > 2500:
-        body = body[:1200] + '\n……\n' + body[-1200:]
+    if len(body) > 2000:
+        body = body[:1000] + '\n……\n' + body[-1000:]
 
-    head = '🚨 Yuanta 排程異常' if code != 0 else '✅ Yuanta 排程檢查（--force 測試）'
-    telegram_notify(
-        f'{head}\n'
-        f'時間：{now}\n'
-        f'不正常項數：{code}\n'
-        f'—— 檢查結果 ——\n'
-        f'{body}\n'
-        f'—— 排查 ——\n'
-        f'結束碼 2147946720 = principal 問題復發，見 CLAUDE.md §4。'
-    )
-    log(f'[watchdog] 已回報（不正常項數 {code}）')
+    if code != 0:
+        head = '🚨 Yuanta 排程異常'
+    elif gaps_code > 0:
+        head = '🚨 Yuanta 資料缺口'
+    else:
+        head = '✅ Yuanta 檢查（--force 測試）'
+
+    msg = (f'{head}\n'
+           f'時間：{now}\n'
+           f'排程不正常項數：{code}\n'
+           f'prices_tw 缺口：{gaps_code}\n'
+           f'—— 排程檢查 ——\n'
+           f'{body}\n')
+    if gaps_code > 0:
+        tail = gaps_out.strip()[-700:]
+        msg += (f'—— 資料缺口 ——\n{tail}\n'
+                f'補法：python yuanta_prices_backfill.py --date <日期> --commit\n')
+    msg += '—— 排查 ——\n結束碼 2147946720 = principal 問題復發，見 CLAUDE.md §4。'
+
+    telegram_notify(msg)
+    log(f'[watchdog] 已回報（排程 {code} 項、資料缺口 {gaps_code} 天）')
 
     # 這裡刻意 exit 0：watchdog 本身「成功完成了它的工作」。
     # 非 0 會讓外層的 guard 再發一則重複的 Telegram。
