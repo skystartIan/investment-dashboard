@@ -927,17 +927,77 @@ function dailyUpdateUSPrices() {
   try {
     var r = _writePricesUS(ss);
     Logger.log('dailyUpdateUSPrices 完成：' + JSON.stringify(r));
-    if (!r || r.ok === true) {
-      sendTelegram('✅ [美股價格] 收盤價寫入成功 ' + now + (r ? '\n日期：' + r.date : ''));
-    } else if (r.ok === 'skip') {
-      // 正常跳過（盤中 / 已存在）→ 不發通知，只記 log
-      Logger.log('dailyUpdateUSPrices 跳過：' + r.reason);
+    // 注意：這裡原本是 if (!r || r.ok === true)，會把 undefined 當成「成功」回報。
+    if (r && r.ok === true) {
+      sendTelegram('✅ [美股價格] 收盤價寫入成功 ' + now + (r.date ? '\n日期：' + r.date : ''));
+    } else if (r && r.ok === 'skip') {
+      // 跳過本身可能是正常的（盤中 / 當天已寫過），但「連續好幾個交易日沒有新資料」不是。
+      // _writePricesUS 只寫「最新那天」，從不回頭補洞 —— 某天沒抓到，那天就永久消失。
+      // 2026-09-03 的 us_prices 就是這樣不見的：靜默的跳過與靜默的失敗長得一模一樣。
+      var lag = _usPricesLagWeekdays(ss);
+      if (lag >= 2) {
+        sendTelegram(
+          '⚠️ [美股價格] 已有 ' + lag + ' 個交易日沒有新資料 ' + now + '\n' +
+          '本次跳過原因：' + (r.reason || '未知') + '（抓到 ' + (r.date || '?') + '）\n' +
+          'us_prices 需要補件 —— _writePricesUS 不會自動回補漏掉的日期。'
+        );
+      } else {
+        Logger.log('dailyUpdateUSPrices 跳過：' + r.reason + '（落後 ' + lag + ' 個交易日，視為正常）');
+      }
     } else {
-      sendTelegram('⚠️ [美股價格] 無法寫入 ' + now + '\n原因：' + (r.reason || '未知'));
+      sendTelegram('⚠️ [美股價格] 無法寫入 ' + now + '\n原因：' + ((r && r.reason) || '未知'));
+    }
+
+    // 自癒：不論本輪寫入或跳過，都回頭看最近幾天有沒有洞。
+    // 09-03 就是這樣沒的 —— 本輪搶在 Yahoo 出日 K 之前跑，判定 exists 跳過；
+    // 隔天那輪抓到更新的日期、順利寫入，那個洞就再也沒有人回頭看了。
+    // 這行讓「漏掉一天」變成隔天自動補回來，而不是永久消失。
+    var gaps = _fillUSPriceGaps(ss, 7, false);
+    if (gaps && gaps.filled && gaps.filled.length) {
+      sendTelegram('🔧 [美股價格] 自動補上遺漏日期 ' + now + '\n' + gaps.filled.join('、'));
     }
   } catch(e) {
     Logger.log('dailyUpdateUSPrices 錯誤：' + e);
     sendTelegram('❌ [美股價格] 收盤價更新失敗 ' + now + '\n錯誤：' + e);
+  }
+}
+
+// 回傳 us_prices 最新一列落後今天幾個「平日」（不含週末；不判斷美股假日）。
+// 用平日而非日曆天，週末與正常的 T+1 落後才不會誤判：
+//   週二中午最新是週一 → 0；週一中午最新是週五 → 0（週末不算）；
+//   週一放假的週二，最新是週五 → 1（容忍，不吵）；真的漏掉兩個交易日 → >= 2。
+// 代價：只漏一天時當天不會示警，要到隔天才會（lag 變 2）。這是為了不被美股假日誤觸發。
+function _usPricesLagWeekdays(ss) {
+  try {
+    var ws = ss.getSheetByName('us_prices');
+    if (!ws) return 99;
+    var vals = ws.getDataRange().getValues();
+    if (vals.length < 2) return 99;
+
+    var newest = '';
+    for (var i = 1; i < vals.length; i++) {
+      var d = vals[i][0];
+      var s = (d instanceof Date)
+        ? Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd')
+        : String(d).trim();
+      if (s && s > newest) newest = s;   // ISO 字串可直接比大小
+    }
+    if (!newest) return 99;
+
+    var p = newest.split('-');
+    var t = Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    var q = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd').split('-');
+    var today = Date.UTC(Number(q[0]), Number(q[1]) - 1, Number(q[2]));
+
+    var lag = 0;
+    for (t += 86400000; t < today; t += 86400000) {
+      var wd = new Date(t).getUTCDay();
+      if (wd !== 0 && wd !== 6) lag++;
+    }
+    return lag;
+  } catch (e) {
+    Logger.log('_usPricesLagWeekdays 錯誤：' + e);
+    return 0;   // 算不出來時寧可不示警，也不要每天誤報
   }
 }
 
@@ -1220,6 +1280,125 @@ function _writePricesUS(ss) {
   }
   Logger.log('✅ _writePricesUS 完成：' + priceDate + '，持倉 ' + currentTickers.length + ' 支 + ' + US_BENCHMARKS.join('/'));
   return {ok:true, date:priceDate};
+}
+
+// ════════════════════════════════════════════════════════════════
+// us_prices 補洞（自癒）
+// ════════════════════════════════════════════════════════════════
+// _writePricesUS 只寫「Yahoo 當下的最新那天」，從不回頭補。
+// 2026-09-04 的執行記錄顯示：觸發器在台北 12:22（美東 00:22，收盤後約 8.4 小時）就跑了，
+// 29 支 ticker 全部只拿到 09-02 —— 搶在 Yahoo 放出 09-03 日 K 之前。
+// 於是判定 exists、靜默跳過；隔天那輪抓到 09-04 順利寫入，09-03 這個洞就被永遠跳過去了。
+//
+// 這裡補的是那個結構性缺口：檢查最近幾天有沒有洞，有就回填。
+// dailyUpdateUSPrices 每輪結束都會呼叫一次（自癒），也可在編輯器手動執行 backfillUSPriceGaps。
+//
+// 「那天是不是美股交易日」用一支探針（^GSPC）判斷：抓不到就當非交易日，不留空列。
+// 這樣每個缺口只多一次 API 呼叫，不會為了週末與假日對 29 支狂打 Yahoo。
+
+var BACKFILL_US_LOOKBACK_DAYS = 7;     // 手動執行時往回看幾個日曆天
+var BACKFILL_US_DRYRUN        = true;  // 手動執行預設不寫入；看完 log 再改 false
+
+function backfillUSPriceGaps() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var r  = _fillUSPriceGaps(ss, BACKFILL_US_LOOKBACK_DAYS, BACKFILL_US_DRYRUN !== false);
+  Logger.log('backfillUSPriceGaps 結果：' + JSON.stringify(r));
+  return r;
+}
+
+function _usDsNorm(v) {
+  if (!v) return '';
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Taipei', 'yyyy-MM-dd');
+  return String(v).slice(0, 10);
+}
+
+// 回補最近 lookbackDays 天內 us_prices 缺少的美股交易日。
+// dry = true 時只記 log 不寫入。回傳 {filled:[...], skipped:[...非交易日]}。
+function _fillUSPriceGaps(ss, lookbackDays, dry) {
+  var ws = ss.getSheetByName('us_prices');
+  if (!ws) return {filled:[], skipped:[], reason:'no_sheet'};
+
+  var allData = ws.getDataRange().getValues();
+  if (!allData.length) return {filled:[], skipped:[], reason:'empty'};
+  var header = allData[0].map(String);
+
+  var have = {};
+  for (var i = 1; i < allData.length; i++) have[_usDsNorm(allData[i][0])] = true;
+
+  // 候選：最近 lookbackDays 個日曆天裡的平日。不含今天 —— 今天要嘛盤中、要嘛還沒收盤。
+  var q = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyy-MM-dd').split('-');
+  var todayMs = Date.UTC(Number(q[0]), Number(q[1]) - 1, Number(q[2]));
+  var candidates = [];
+  for (var d = 1; d <= lookbackDays; d++) {
+    var ms = todayMs - d * 86400000;
+    var wd = new Date(ms).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    candidates.push(Utilities.formatDate(new Date(ms), 'UTC', 'yyyy-MM-dd'));
+  }
+  candidates.sort();   // 由舊到新
+
+  var missing = candidates.filter(function(dt){ return !have[dt]; });
+  if (!missing.length) return {filled:[], skipped:[], checked:candidates.length};
+  Logger.log('_fillUSPriceGaps: 最近 ' + lookbackDays + ' 天缺 ' + missing.join(','));
+
+  var tickers = _getUSHoldingsTickers(ss).filter(function(t){
+    return US_BENCHMARKS.indexOf(t) < 0;
+  });
+
+  var filled = [], notTrading = [], newRows = [];
+  missing.forEach(function(date) {
+    // 探針：先確認是不是交易日
+    var probe = _fetchYahooHistory(US_BENCHMARK_MAP['S&P500'], date, date)
+      .filter(function(x){ return x.date === date; });
+    if (!probe.length) { notTrading.push(date); return; }
+
+    var priceMap = {};
+    tickers.forEach(function(tk) {
+      _fetchYahooHistory(tk, date, date).forEach(function(x){
+        if (x.date === date) priceMap[tk] = x.close;
+      });
+      Utilities.sleep(200);
+    });
+    US_BENCHMARKS.forEach(function(name) {
+      _fetchYahooHistory(US_BENCHMARK_MAP[name], date, date).forEach(function(x){
+        if (x.date === date) priceMap[name] = x.close;
+      });
+      Utilities.sleep(200);
+    });
+
+    // 只填既有 header 有的欄位 —— 補件不該改動表結構，那是 _writePricesUS 的職責
+    var row = header.map(function(col, idx) {
+      if (idx === 0) return date;
+      return (priceMap[col] !== undefined) ? priceMap[col] : '';
+    });
+    var n = 0;
+    for (var k = 1; k < row.length; k++) if (row[k] !== '') n++;
+    Logger.log('_fillUSPriceGaps ' + date + '：填 ' + n + '/' + (header.length - 1) + ' 欄');
+    if (n) { newRows.push(row); filled.push(date); }
+  });
+
+  if (!filled.length) return {filled:[], skipped:notTrading, checked:candidates.length};
+
+  if (dry) {
+    Logger.log('_fillUSPriceGaps: DRY RUN —— 沒有寫入。要真的補請把 BACKFILL_US_DRYRUN 改成 false。');
+    return {filled:filled, skipped:notTrading, dryrun:true};
+  }
+
+  newRows.forEach(function(r){ ws.appendRow(r); });
+
+  // 降冪重排（與 _writePricesUS 一致）
+  var allRows  = ws.getDataRange().getValues();
+  var sortHdr  = allRows[0];
+  var sortBody = allRows.slice(1).sort(function(a, b) {
+    var da = _usDsNorm(a[0]), db = _usDsNorm(b[0]);
+    return db > da ? 1 : db < da ? -1 : 0;
+  });
+  ws.clearContents();
+  ws.getRange(1, 1, 1, sortHdr.length).setValues([sortHdr]).setFontWeight('bold');
+  if (sortBody.length) ws.getRange(2, 1, sortBody.length, sortHdr.length).setValues(sortBody);
+
+  Logger.log('✅ _fillUSPriceGaps 補上：' + filled.join(','));
+  return {filled:filled, skipped:notTrading};
 }
 
 function cleanupUSPrices() {
